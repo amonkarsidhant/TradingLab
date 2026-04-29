@@ -54,8 +54,9 @@ cd sid-trading-lab
 python3 -m venv .venv
 source .venv/bin/activate
 
-# 3. Install dependencies
+# 3. Install dependencies and package
 pip install -r requirements.txt
+pip install -e .
 
 # 4. Create local environment file
 cp .env.example .env

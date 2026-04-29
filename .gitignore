@@ -13,3 +13,4 @@ data/
 # SSH keys — never commit private keys
 tradinglab
 tradinglab.pub
+src/*.egg-info/
