@@ -173,6 +173,100 @@ def test_render_report_includes_signal_details():
     assert "AAPL_US_EQ" in report
 
 
+# ── Anthropic provider content extraction ──────────────────────────────────────
+
+def _make_text_block(text):
+    class _TextBlock:
+        type = "text"
+        text = text
+    return _TextBlock()
+
+
+def _make_thinking_block(text="..."):
+    class _ThinkingBlock:
+        type = "thinking"
+        thinking = text
+    return _ThinkingBlock()
+
+
+def test_anthropic_provider_iterates_content_blocks(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    pytest.importorskip("anthropic")
+    import anthropic as _anthropic_mod
+    from trading_lab.agents.runner import _try_anthropic
+
+    class _FakeMsg:
+        content = [_make_thinking_block(), _make_text_block("hello")]
+
+    class _FakeClient:
+        def messages(self):
+            return self
+        def create(self, **kw):
+            return _FakeMsg()
+
+    original_cls = _anthropic_mod.Anthropic
+    try:
+        _anthropic_mod.Anthropic = _FakeClient
+        provider, _ = _try_anthropic()
+        result = provider.complete("s", "u")
+        assert result == "hello"
+    finally:
+        _anthropic_mod.Anthropic = original_cls
+
+
+def test_anthropic_provider_handles_empty_content(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    pytest.importorskip("anthropic")
+    import anthropic as _anthropic_mod
+    from trading_lab.agents.runner import _try_anthropic
+
+    class _FakeMsg:
+        content = []
+
+    class _FakeClient:
+        def messages(self):
+            return self
+        def create(self, **kw):
+            return _FakeMsg()
+
+    original_cls = _anthropic_mod.Anthropic
+    try:
+        _anthropic_mod.Anthropic = _FakeClient
+        provider, _ = _try_anthropic()
+        result = provider.complete("s", "u")
+        assert result == ""
+    finally:
+        _anthropic_mod.Anthropic = original_cls
+
+
+def test_anthropic_provider_fallback_to_first_block(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    pytest.importorskip("anthropic")
+    import anthropic as _anthropic_mod
+    from trading_lab.agents.runner import _try_anthropic
+
+    class _TextOnly:
+        text = "fallback"
+
+    class _FakeMsg:
+        content = [_TextOnly()]
+
+    class _FakeClient:
+        def messages(self):
+            return self
+        def create(self, **kw):
+            return _FakeMsg()
+
+    original_cls = _anthropic_mod.Anthropic
+    try:
+        _anthropic_mod.Anthropic = _FakeClient
+        provider, _ = _try_anthropic()
+        result = provider.complete("s", "u")
+        assert result == "fallback"
+    finally:
+        _anthropic_mod.Anthropic = original_cls
+
+
 # ── Prompt templates (unit tests) ──────────────────────────────────────────────
 
 def test_technical_analyst_prompt_includes_signal_and_context():

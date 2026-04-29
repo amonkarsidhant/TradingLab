@@ -92,7 +92,15 @@ def _try_anthropic() -> tuple[LLMProvider, str]:
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
-            return msg.content[0].text
+            if not msg.content:
+                return ""
+            for block in msg.content:
+                if getattr(block, "type", None) == "text" and hasattr(block, "text"):
+                    return block.text
+            first = msg.content[0]
+            if hasattr(first, "text"):
+                return first.text
+            return ""
 
     return _AnthropicProvider(), model
 
