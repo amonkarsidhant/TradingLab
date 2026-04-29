@@ -6,3 +6,7 @@ __pycache__/
 data/
 *.log
 .DS_Store
+
+# SSH keys — never commit private keys
+tradinglab
+tradinglab.pub
