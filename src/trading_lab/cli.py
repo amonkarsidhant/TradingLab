@@ -5,6 +5,8 @@ from pathlib import Path
 import typer
 from rich import print
 
+from trading_lab.backtest.engine import BacktestEngine
+from trading_lab.backtest.report import render_report
 from trading_lab.config import get_settings
 from trading_lab.brokers.trading212 import Trading212Client
 from trading_lab.data.market_data import make_provider
@@ -110,18 +112,11 @@ def run_strategy(
         help="RSI overbought threshold (mean_reversion only).",
     ),
 ):
-    # Build strategy kwargs from the CLI options — pass only what the strategy
-    # constructor expects.  This is a simple dispatch; a proper per-strategy
-    # CLI group would be nicer but we're keeping things boring and flat.
-    strategy_kwargs: dict = {}
-    if strategy == "simple_momentum":
-        strategy_kwargs = {"lookback": lookback}
-    elif strategy == "ma_crossover":
-        strategy_kwargs = {"fast": fast, "slow": slow}
-    elif strategy == "mean_reversion":
-        strategy_kwargs = {"period": rsi_period, "oversold": oversold, "overbought": overbought}
-
-    strat = get_strategy(strategy, **strategy_kwargs)
+    kwargs = _build_strategy_kwargs(
+        strategy, lookback=lookback, fast=fast, slow=slow,
+        rsi_period=rsi_period, oversold=oversold, overbought=overbought,
+    )
+    strat = get_strategy(strategy, **kwargs)
 
     provider = make_provider(
         source=data_source,
@@ -146,6 +141,70 @@ def list_strategies_cli():
     """List all available strategies with their names."""
     for name in sorted(list_strategies()):
         print(f"  [bold]{name}[/bold]")
+
+
+@app.command("backtest")
+def backtest(
+    strategy: str = typer.Option("simple_momentum"),
+    ticker: str = typer.Option("AAPL_US_EQ"),
+    data_source: str = typer.Option(
+        "static",
+        help="Price data source: 'static', 'csv', 'yfinance', or 'chained'.",
+    ),
+    prices_file: str = typer.Option(
+        "",
+        help="Path to CSV price file (csv/chained mode only).",
+    ),
+    lookback: int = typer.Option(5, help="Lookback window for simple_momentum."),
+    fast: int = typer.Option(10, help="Fast SMA period (ma_crossover only)."),
+    slow: int = typer.Option(30, help="Slow SMA period (ma_crossover only)."),
+    rsi_period: int = typer.Option(14, help="RSI period (mean_reversion only)."),
+    oversold: int = typer.Option(30, help="RSI oversold (mean_reversion only)."),
+    overbought: int = typer.Option(70, help="RSI overbought (mean_reversion only)."),
+    capital: float = typer.Option(10_000.0, help="Initial capital for the backtest."),
+    output: str = typer.Option("", help="Write markdown report to file. Defaults to stdout."),
+):
+    """Run a walk-forward backtest and print a markdown report."""
+    kwargs = _build_strategy_kwargs(
+        strategy, lookback=lookback, fast=fast, slow=slow,
+        rsi_period=rsi_period, oversold=oversold, overbought=overbought,
+    )
+    strat = get_strategy(strategy, **kwargs)
+
+    provider = make_provider(
+        source=data_source,
+        ticker=ticker,
+        prices_file=prices_file,
+        cache_db=get_settings().db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
+    # Fetch a generous amount of history for the backtest.
+    prices = provider.get_prices(ticker=ticker, lookback=252)
+
+    engine = BacktestEngine(strat, initial_capital=capital)
+    result = engine.run(prices=prices, ticker=ticker)
+
+    report = render_report(result)
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        print(f"[green]Backtest report written to {output_path}[/green]")
+    else:
+        typer.echo(report)
+
+
+def _build_strategy_kwargs(name: str, **all_kwargs) -> dict:
+    if name == "simple_momentum":
+        return {"lookback": all_kwargs["lookback"]}
+    if name == "ma_crossover":
+        return {"fast": all_kwargs["fast"], "slow": all_kwargs["slow"]}
+    if name == "mean_reversion":
+        return {
+            "period": all_kwargs["rsi_period"],
+            "oversold": all_kwargs["oversold"],
+            "overbought": all_kwargs["overbought"],
+        }
+    return {}
 
 
 @app.command("daily-journal")

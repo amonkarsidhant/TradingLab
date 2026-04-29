@@ -212,6 +212,43 @@ python -m trading_lab.cli run-strategy \
   --dry-run
 ```
 
+## Backtesting
+
+```bash
+# Walk-forward backtest with markdown report
+python -m trading_lab.cli backtest --strategy simple_momentum --data-source static
+
+# Backtest with CSV data and a specific output file
+python -m trading_lab.cli backtest \
+  --strategy ma_crossover \
+  --data-source csv \
+  --ticker AAPL_US_EQ \
+  --output docs/backtests/ma-crossover-AAPL.md
+
+# Backtest with custom capital amount
+python -m trading_lab.cli backtest \
+  --strategy mean_reversion \
+  --data-source static \
+  --capital 5000
+```
+
+The report covers:
+
+- Performance metrics (total return, CAGR, Sharpe ratio, max drawdown, win rate, profit factor)
+- Trade list with entry/exit dates, prices, P&L, and return %
+- Signal breakdown (BUY/SELL/HOLD counts)
+- ASCII sparkline of the equity curve
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `--strategy` | simple_momentum | Strategy to backtest |
+| `--ticker` | AAPL_US_EQ | Ticker symbol |
+| `--data-source` | static | static, csv, yfinance, or chained |
+| `--capital` | 10000 | Initial capital in account currency |
+| `--output` | stdout | Write markdown report to file path |
+
 ## Daily journal
 
 ### Automatic report (generated from the SQLite log)
