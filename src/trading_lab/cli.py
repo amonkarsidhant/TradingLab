@@ -5,6 +5,8 @@ from pathlib import Path
 import typer
 from rich import print
 
+from trading_lab.agents.pipeline import ReviewPipeline, render_review_report
+from trading_lab.agents.runner import AgentRunner, detect_provider
 from trading_lab.backtest.engine import BacktestEngine
 from trading_lab.backtest.report import render_report
 from trading_lab.config import get_settings
@@ -205,6 +207,57 @@ def _build_strategy_kwargs(name: str, **all_kwargs) -> dict:
             "overbought": all_kwargs["overbought"],
         }
     return {}
+
+
+@app.command("review-signal")
+def review_signal(
+    strategy: str = typer.Option("simple_momentum"),
+    ticker: str = typer.Option("AAPL_US_EQ"),
+    data_source: str = typer.Option(
+        "static",
+        help="Price data source: 'static', 'csv', 'yfinance', or 'chained'.",
+    ),
+    prices_file: str = typer.Option("", help="Path to CSV price file."),
+    lookback: int = typer.Option(5),
+    fast: int = typer.Option(10),
+    slow: int = typer.Option(30),
+    rsi_period: int = typer.Option(14),
+    oversold: int = typer.Option(30),
+    overbought: int = typer.Option(70),
+    output: str = typer.Option("", help="Write review to file. Defaults to stdout."),
+):
+    """Run the multi-agent review pipeline against a signal."""
+    kwargs = _build_strategy_kwargs(
+        strategy, lookback=lookback, fast=fast, slow=slow,
+        rsi_period=rsi_period, oversold=oversold, overbought=overbought,
+    )
+    strat = get_strategy(strategy, **kwargs)
+
+    provider = make_provider(
+        source=data_source, ticker=ticker, prices_file=prices_file,
+        cache_db=get_settings().db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
+    prices = provider.get_prices(ticker=ticker, lookback=max(lookback, 20))
+    signal = strat.generate_signal(ticker=ticker, prices=prices)
+
+    runner = AgentRunner()
+    provider_name, model = detect_provider()
+    print(f"[dim]Using {provider_name} / {model}[/dim]")
+
+    pipeline = ReviewPipeline(
+        runner=runner,
+        db_path=get_settings().db_path,
+    )
+    result = pipeline.review(signal, prices=prices)
+    report = render_review_report(result)
+
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        print(f"[green]Review written to {output_path}[/green]")
+    else:
+        typer.echo(report)
 
 
 @app.command("daily-journal")

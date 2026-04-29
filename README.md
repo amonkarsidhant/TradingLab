@@ -249,6 +249,42 @@ The report covers:
 | `--capital` | 10000 | Initial capital in account currency |
 | `--output` | stdout | Write markdown report to file path |
 
+## Multi-agent review
+
+```bash
+# Run the full review pipeline against a signal
+python -m trading_lab.cli review-signal \
+  --strategy simple_momentum \
+  --data-source static
+
+# Review with a specific ticker and write to file
+python -m trading_lab.cli review-signal \
+  --strategy ma_crossover \
+  --ticker AAPL_US_EQ \
+  --data-source yfinance \
+  --output docs/reviews/ma-crossover-AAPL.md
+```
+
+The pipeline runs five agents in sequence:
+
+| Agent | Role |
+|---|---|
+| Technical Analyst | Evaluates price action, trend, and strategy logic |
+| Fundamentals Analyst | Assesses macro context and market conditions |
+| Bull Researcher | Makes the strongest case for the signal |
+| Bear Researcher | Makes the strongest case against the signal |
+| Risk Reviewer | Evaluates position size, drawdown, and risk level |
+
+All agent outputs are journaled to SQLite (`agent_reviews` table) for audit.
+
+**Requires an LLM provider.** Set one of:
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `OPENROUTER_API_KEY`
+- Ensure Ollama is running (uses `OLLAMA_BASE_URL`, default `http://localhost:11434`)
+
+Override the model with `AGENT_MODEL` (e.g. `claude-sonnet-4-6`, `gpt-5.1`).
+
 ## Daily journal
 
 ### Automatic report (generated from the SQLite log)
