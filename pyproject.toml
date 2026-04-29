@@ -1,0 +1,9 @@
+[project]
+name = "sid-trading-lab"
+version = "0.1.0"
+description = "Demo-first trading trading lab with Trading 212 integration"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
