@@ -16,6 +16,8 @@ from trading_lab.engine import ExecutionEngine
 from trading_lab.logger import SnapshotLogger
 from trading_lab.reports.daily_journal import DailyJournal
 from trading_lab.risk import RiskPolicy
+from trading_lab.shadow.account import ShadowAccount
+from trading_lab.shadow.report import render_shadow_report
 from trading_lab.strategies import get_strategy, list_strategies
 
 app = typer.Typer(help="Sid Trading Lab CLI")
@@ -256,6 +258,56 @@ def review_signal(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(report, encoding="utf-8")
         print(f"[green]Review written to {output_path}[/green]")
+    else:
+        typer.echo(report)
+
+
+@app.command("shadow-report")
+def shadow_report(
+    strategy: str = typer.Option("simple_momentum"),
+    ticker: str = typer.Option("AAPL_US_EQ"),
+    data_source: str = typer.Option(
+        "static",
+        help="Price data source: 'static', 'csv', 'yfinance', or 'chained'.",
+    ),
+    prices_file: str = typer.Option("", help="Path to CSV price file."),
+    lookback: int = typer.Option(5),
+    fast: int = typer.Option(10),
+    slow: int = typer.Option(30),
+    rsi_period: int = typer.Option(14),
+    oversold: int = typer.Option(30),
+    overbought: int = typer.Option(70),
+    from_date: str = typer.Option("", help="Start date (YYYY-MM-DD)."),
+    to_date: str = typer.Option("", help="End date (YYYY-MM-DD)."),
+    output: str = typer.Option("", help="Write report to file. Defaults to stdout."),
+):
+    """Compare mechanical strategy execution against journaled signals."""
+    kwargs = _build_strategy_kwargs(
+        strategy, lookback=lookback, fast=fast, slow=slow,
+        rsi_period=rsi_period, oversold=oversold, overbought=overbought,
+    )
+    strat = get_strategy(strategy, **kwargs)
+
+    provider = make_provider(
+        source=data_source, ticker=ticker, prices_file=prices_file,
+        cache_db=get_settings().db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
+    prices = provider.get_prices(ticker=ticker, lookback=252)
+
+    shadow = ShadowAccount(strategy=strat, db_path=get_settings().db_path)
+    result = shadow.compare(
+        prices=prices,
+        ticker=ticker,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    report = render_shadow_report(result)
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        print(f"[green]Shadow report written to {output_path}[/green]")
     else:
         typer.echo(report)
 

@@ -285,6 +285,48 @@ All agent outputs are journaled to SQLite (`agent_reviews` table) for audit.
 
 Override the model with `AGENT_MODEL` (e.g. `claude-sonnet-4-6`, `gpt-5.1`).
 
+## Shadow account
+
+The shadow account compares what a strategy *would have done* (mechanical backtest)
+against what you *actually did* (journaled signals). It measures behavioral drift:
+missed entries, HOLD overrides, extra signals, and overtrading.
+
+```bash
+# Compare strategy backtest against your journaled signals
+python -m trading_lab.cli shadow-report \
+  --strategy simple_momentum \
+  --data-source static
+
+# Filter by date range and write to file
+python -m trading_lab.cli shadow-report \
+  --strategy ma_crossover \
+  --ticker AAPL_US_EQ \
+  --data-source yfinance \
+  --from-date 2026-04-01 \
+  --to-date 2026-04-29 \
+  --output docs/shadow/ma-crossover-AAPL.md
+```
+
+The report covers:
+
+- **Summary table** — shadow (mechanical) vs actual (journaled) side by side
+- **Drift metrics** — signal adherence, missed entries, extra signals, HOLD overrides, overtrading score
+- **Behavioral gap analysis** — plain-language notes on what diverged and why
+- **Interpretation guide** — how to read each metric and what to do about it
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `--strategy` | simple_momentum | Strategy to use for the shadow backtest |
+| `--ticker` | AAPL_US_EQ | Ticker symbol |
+| `--data-source` | static | static, csv, yfinance, or chained |
+| `--from-date` | (all) | Start date filter for journaled signals (YYYY-MM-DD) |
+| `--to-date` | (all) | End date filter for journaled signals (YYYY-MM-DD) |
+| `--output` | stdout | Write markdown report to file path |
+
+The shadow does not judge. It just shows what the strategy would have done.
+
 ## Daily journal
 
 ### Automatic report (generated from the SQLite log)
