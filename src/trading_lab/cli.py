@@ -6,6 +6,11 @@ from rich import print
 
 from trading_lab.config import get_settings
 from trading_lab.brokers.trading212 import Trading212Client
+from trading_lab.data.market_data import (
+    CsvMarketDataProvider,
+    MarketDataProvider,
+    StaticMarketDataProvider,
+)
 from trading_lab.engine import ExecutionEngine
 from trading_lab.logger import SnapshotLogger
 from trading_lab.risk import RiskPolicy
@@ -20,6 +25,19 @@ def get_client() -> Trading212Client:
 
 def get_logger() -> SnapshotLogger:
     return SnapshotLogger(get_settings().db_path)
+
+
+def _get_market_data_provider(
+    data_source: str, ticker: str, prices_file: str
+) -> MarketDataProvider:
+    if data_source == "static":
+        return StaticMarketDataProvider()
+    if data_source == "csv":
+        path = prices_file or f"data/market/prices/{ticker}.csv"
+        return CsvMarketDataProvider(path)
+    raise typer.BadParameter(
+        f"Unknown --data-source '{data_source}'. Use 'static' or 'csv'."
+    )
 
 
 @app.command("account-summary")
@@ -73,14 +91,27 @@ def run_strategy(
     strategy: str = typer.Option("simple_momentum"),
     ticker: str = typer.Option("AAPL_US_EQ"),
     dry_run: bool = typer.Option(True),
+    data_source: str = typer.Option(
+        "static",
+        help="Price data source: 'static' (offline deterministic) or 'csv' (local file).",
+    ),
+    prices_file: str = typer.Option(
+        "",
+        help="Path to CSV price file (csv mode only). "
+             "Defaults to data/market/prices/{ticker}.csv if not provided.",
+    ),
+    lookback: int = typer.Option(
+        5,
+        help="Lookback window in periods for the momentum strategy.",
+    ),
 ):
     if strategy != "simple_momentum":
         raise typer.BadParameter("Only simple_momentum exists in the starter kit.")
 
-    # Placeholder price list. Replace this with real market data in later sprint days.
-    prices = [100, 101, 102, 103, 104, 106]
+    provider = _get_market_data_provider(data_source, ticker, prices_file)
+    prices = provider.get_prices(ticker=ticker, lookback=lookback)
 
-    strat = SimpleMomentumStrategy()
+    strat = SimpleMomentumStrategy(lookback=lookback)
     signal = strat.generate_signal(ticker=ticker, prices=prices)
 
     engine = ExecutionEngine(

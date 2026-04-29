@@ -88,6 +88,69 @@ git remote add origin git@github.com:<your-user>/sid-trading-lab.git
 git push -u origin main
 ```
 
+## Market data
+
+### Important: Trading 212 is not a market data source
+
+The Trading 212 API does not expose a general OHLC / candle historical price
+endpoint. It is used here only as the **broker and account API** (positions,
+account summary, order placement in later phases).
+
+Price data for strategy input must come from a local CSV file or a future
+external provider.
+
+### Local CSV price file format
+
+```text
+data/market/prices/{ticker}.csv
+```
+
+Columns (required): `date`, `close`
+
+```csv
+date,close
+2026-04-20,100.0
+2026-04-21,101.2
+2026-04-22,102.1
+```
+
+The `data/` directory is gitignored. Create the file manually on your machine.
+
+```bash
+mkdir -p data/market/prices
+# Add your own OHLC data here:
+cat > data/market/prices/AAPL_US_EQ.csv << 'EOF'
+date,close
+2026-04-15,169.50
+2026-04-16,171.20
+2026-04-17,172.80
+2026-04-20,174.10
+2026-04-21,175.60
+2026-04-22,177.00
+EOF
+```
+
+### Running the strategy
+
+```bash
+# Offline mode — uses built-in deterministic sample prices (no files needed)
+python -m trading_lab.cli run-strategy --data-source static --dry-run
+
+# CSV mode — loads prices from local file
+python -m trading_lab.cli run-strategy \
+  --data-source csv \
+  --ticker AAPL_US_EQ \
+  --dry-run
+
+# CSV mode with explicit file path
+python -m trading_lab.cli run-strategy \
+  --data-source csv \
+  --ticker AAPL_US_EQ \
+  --prices-file data/market/prices/AAPL_US_EQ.csv \
+  --lookback 5 \
+  --dry-run
+```
+
 ## Daily journal
 
 Create one file per day under:

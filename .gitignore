@@ -3,7 +3,7 @@
 *.sqlite3
 __pycache__/
 .pytest_cache/
-data/
+/data/
 *.log
 .DS_Store
 
