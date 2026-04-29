@@ -22,6 +22,7 @@ class Settings:
     t212_allow_live: bool
     order_placement_enabled: bool
     t212_confirm_live: str
+    demo_order_confirm: str
     db_path: str
 
     @property
@@ -47,7 +48,7 @@ class Settings:
         # ORDER_PLACEMENT_ENABLED=true. Live order placement remains blocked
         # by additional confirmation.
         if self.t212_env == "demo":
-            return True
+            return self.demo_order_confirm == "I_ACCEPT_DEMO_ORDER_TEST"
 
         if self.t212_env == "live":
             return (
@@ -66,5 +67,6 @@ def get_settings() -> Settings:
         t212_allow_live=_as_bool(os.getenv("T212_ALLOW_LIVE"), False),
         order_placement_enabled=_as_bool(os.getenv("ORDER_PLACEMENT_ENABLED"), False),
         t212_confirm_live=os.getenv("T212_CONFIRM_LIVE", ""),
+        demo_order_confirm=os.getenv("DEMO_ORDER_CONFIRM", ""),
         db_path=os.getenv("TRADING_LAB_DB", "./trading_lab.sqlite3"),
     )

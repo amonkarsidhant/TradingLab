@@ -82,10 +82,14 @@ git init
 git add .
 git commit -m "Initial Sid Trading Lab scaffold"
 
-# Create an empty GitHub repo named sid-trading-lab, then:
+# Create an empty GitHub repo, then add the remote and push.
+# SSH (recommended — no password prompts once key is set up):
 git branch -M main
-git remote add origin git@github.com:<your-user>/sid-trading-lab.git
+git remote add origin git@github.com:amonkarsidhant/TradingLab.git
 git push -u origin main
+
+# HTTPS alternative (will prompt for GitHub username + PAT):
+# git remote add origin https://github.com/amonkarsidhant/TradingLab.git
 ```
 
 ## Market data

@@ -24,6 +24,7 @@ def _demo_settings(**overrides) -> Settings:
         t212_allow_live=False,
         order_placement_enabled=False,
         t212_confirm_live="",
+        demo_order_confirm="",
         db_path="./test.sqlite3",
     )
     defaults.update(overrides)

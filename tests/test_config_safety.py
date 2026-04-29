@@ -119,3 +119,66 @@ def test_invalid_t212_env_raises_value_error(monkeypatch):
 
     with pytest.raises(ValueError, match="T212_ENV must be either"):
         _ = settings.base_url
+
+
+# ── 8. Demo order placement — DEMO_ORDER_CONFIRM gate ────────────────────────
+
+def test_demo_can_place_orders_blocked_without_demo_order_confirm(monkeypatch):
+    """Demo env + ORDER_PLACEMENT_ENABLED=true but no DEMO_ORDER_CONFIRM must block."""
+    monkeypatch.setenv("T212_ENV", "demo")
+    monkeypatch.setenv("ORDER_PLACEMENT_ENABLED", "true")
+    monkeypatch.delenv("DEMO_ORDER_CONFIRM", raising=False)
+
+    settings = get_settings()
+
+    assert settings.can_place_orders is False
+
+
+def test_demo_can_place_orders_blocked_with_wrong_demo_order_confirm(monkeypatch):
+    """Demo env + ORDER_PLACEMENT_ENABLED=true + wrong confirm string must block."""
+    monkeypatch.setenv("T212_ENV", "demo")
+    monkeypatch.setenv("ORDER_PLACEMENT_ENABLED", "true")
+    monkeypatch.setenv("DEMO_ORDER_CONFIRM", "yes_please")
+
+    settings = get_settings()
+
+    assert settings.can_place_orders is False
+
+
+def test_demo_can_place_orders_allowed_with_correct_demo_order_confirm(monkeypatch):
+    """Demo env + ORDER_PLACEMENT_ENABLED=true + correct DEMO_ORDER_CONFIRM must allow."""
+    monkeypatch.setenv("T212_ENV", "demo")
+    monkeypatch.setenv("ORDER_PLACEMENT_ENABLED", "true")
+    monkeypatch.setenv("DEMO_ORDER_CONFIRM", "I_ACCEPT_DEMO_ORDER_TEST")
+
+    settings = get_settings()
+
+    assert settings.can_place_orders is True
+
+
+# ── 9. Live order placement — full confirmation gate ──────────────────────────
+
+def test_live_can_place_orders_allowed_with_full_confirmation(monkeypatch):
+    """Live env + ORDER_PLACEMENT_ENABLED=true + T212_ALLOW_LIVE=true +
+    correct T212_CONFIRM_LIVE must allow order placement."""
+    monkeypatch.setenv("T212_ENV", "live")
+    monkeypatch.setenv("ORDER_PLACEMENT_ENABLED", "true")
+    monkeypatch.setenv("T212_ALLOW_LIVE", "true")
+    monkeypatch.setenv("T212_CONFIRM_LIVE", "I_ACCEPT_REAL_MONEY_RISK")
+
+    settings = get_settings()
+
+    assert settings.can_place_orders is True
+
+
+def test_live_can_place_orders_blocked_without_demo_order_confirm_is_irrelevant(monkeypatch):
+    """DEMO_ORDER_CONFIRM has no bearing on live order placement."""
+    monkeypatch.setenv("T212_ENV", "live")
+    monkeypatch.setenv("ORDER_PLACEMENT_ENABLED", "true")
+    monkeypatch.setenv("T212_ALLOW_LIVE", "true")
+    monkeypatch.setenv("T212_CONFIRM_LIVE", "I_ACCEPT_REAL_MONEY_RISK")
+    monkeypatch.delenv("DEMO_ORDER_CONFIRM", raising=False)
+
+    settings = get_settings()
+
+    assert settings.can_place_orders is True
