@@ -1,23 +1,24 @@
 # Sid Trading Lab
 
-A 30-day local trading lab for MacBook Air.
+A demo-first supervised trading research and strategy lab.
 
-This project is intentionally designed as a **paper/demo-first trading system**.  
-Live trading is blocked by default and should not be enabled until the system has passed your own manual review, backtests, paper-trading logs, and risk checks.
+All execution runs against the Trading 212 demo environment. Live trading is
+blocked by default and must not be enabled until the system has passed manual
+review, backtests, paper-trading logs, and risk checks.
 
-## Core idea
+## Purpose
 
-You are not building a magic trading bot.
+This is not an autonomous trading bot.
 
-You are building a disciplined learning system that helps you:
+It is a disciplined research and strategy lab that helps you:
 
 1. Understand market data and instruments.
-2. Build simple strategies.
-3. Backtest those strategies.
+2. Build and document simple strategies.
+3. Backtest those strategies against historical data.
 4. Paper trade in Trading 212 demo mode.
-5. Record every decision in GitHub.
-6. Review decisions with AI assistants.
-7. Only later decide whether live trading is appropriate.
+5. Record every decision and signal in GitHub.
+6. Review signals and decisions with AI assistants.
+7. Only after manual review, decide whether demo paper-trading should continue.
 
 ## Tool roles
 

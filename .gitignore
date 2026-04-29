@@ -7,6 +7,9 @@ data/
 *.log
 .DS_Store
 
+# Claude Code local session state — not project config (CLAUDE.md is kept)
+.claude/
+
 # SSH keys — never commit private keys
 tradinglab
 tradinglab.pub

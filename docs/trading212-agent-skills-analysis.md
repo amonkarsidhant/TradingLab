@@ -122,12 +122,13 @@ The SKILL.md documents authentication as:
 Authorization: Basic <base64(API_KEY:API_SECRET)>
 ```
 
-**Risk:** The current `trading_lab` code follows this same pattern (key:secret
-Basic auth). However, the real Trading 212 REST API uses a **single API key**
-sent directly in the `Authorization` header — not Basic auth. If the real API
-uses `Authorization: <api_key>` (not Base64-encoded), the current auth
-implementation is wrong and will return 401. This must be verified against the
-official T212 API docs before any live connectivity test.
+This matches the official Trading 212 REST API documentation. The correct
+format is **HTTP Basic Auth** with `API_KEY:API_SECRET` joined by a colon and
+encoded as Base64. The current `trading_lab` code in `brokers/trading212.py`
+correctly implements this pattern — no change needed.
+
+**Credential rule:** API keys must never be committed to Git, logged to disk,
+or pasted into any chat interface. They belong exclusively in `.env`.
 
 ### 5c. DEMO and LIVE keys are not interchangeable
 
@@ -167,9 +168,9 @@ rate limits hard.
    is designed for autonomous AI order placement. Sid Trading Lab must never
    put an AI in the order execution path.
 
-3. **Verify the auth format.** Before any real API calls, check whether T212
-   uses `Authorization: <api_key>` or `Authorization: Basic <base64(key:secret)>`.
-   Fix `brokers/trading212.py` accordingly.
+3. **Auth format is confirmed correct.** T212 uses HTTP Basic Auth:
+   `Authorization: Basic <base64(API_KEY:API_SECRET)>`. The current
+   `brokers/trading212.py` implementation matches this. No change needed.
 
 4. **Only integrate read-only endpoints first.** The safe sequence is:
    account summary → positions → instruments. No order endpoints until
@@ -209,7 +210,7 @@ rate limits hard.
 | Pointing `T212_ENV=live` at any point during the sprint | Core safety rule |
 | Re-fetching instruments per tick | 1 req/50s rate limit; cache instead |
 | Signing quantity incorrectly (SELL = negative) | Flips trade direction silently |
-| Using the SKILL.md auth format without verifying against official T212 docs | Auth may be wrong; verify before first real call |
+| Sharing demo API key in chat, logs, or commit messages | Keys grant full account access even in demo — treat them as passwords |
 | Sharing demo API key in Git, logs, or chat | Keys grant account access even in demo |
 | Letting an AI model decide final trade actions | Against risk-policy.md; AI suggests, human decides |
 
@@ -224,5 +225,5 @@ exactly what Sid Trading Lab must not do.
 
 **Safe to use:** SKILL.md as a reference document.
 **Unsafe to use:** The plugin itself for any live or demo order execution.
-**Priority fix for Sid Trading Lab:** Verify and correct the authentication
-header format before the first real API call.
+**Auth status:** Confirmed correct — HTTP Basic Auth with `API_KEY:API_SECRET`
+is what the official T212 API requires and what the current code implements.
