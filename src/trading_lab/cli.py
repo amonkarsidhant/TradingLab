@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -13,6 +14,7 @@ from trading_lab.data.market_data import (
 )
 from trading_lab.engine import ExecutionEngine
 from trading_lab.logger import SnapshotLogger
+from trading_lab.reports.daily_journal import DailyJournal
 from trading_lab.risk import RiskPolicy
 from trading_lab.strategies.simple_momentum import SimpleMomentumStrategy
 
@@ -121,6 +123,32 @@ def run_strategy(
     )
     result = engine.handle_signal(signal, dry_run=dry_run)
     print_json(result)
+
+
+@app.command("daily-journal")
+def daily_journal(
+    date: str = typer.Option(
+        "",
+        help="Date to report on (YYYY-MM-DD). Defaults to today (UTC).",
+    ),
+    output: str = typer.Option(
+        "",
+        help="Write report to this file path. "
+             "Example: docs/journal/generated/2026-04-29.md. "
+             "Defaults to stdout if not provided.",
+    ),
+):
+    report_date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    journal = DailyJournal(get_settings().db_path)
+    report = journal.generate(report_date)
+
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        print(f"[green]Journal written to {output_path}[/green]")
+    else:
+        typer.echo(report)
 
 
 def print_json(data):

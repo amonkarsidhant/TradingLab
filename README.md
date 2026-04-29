@@ -153,6 +153,41 @@ python -m trading_lab.cli run-strategy \
 
 ## Daily journal
 
+### Automatic report (generated from the SQLite log)
+
+The `daily-journal` command reads snapshots and signals stored by the logger
+and produces a structured markdown report.
+
+```bash
+# Print today's report to stdout
+python -m trading_lab.cli daily-journal
+
+# Report for a specific date
+python -m trading_lab.cli daily-journal --date 2026-04-29
+
+# Write the report to a file
+python -m trading_lab.cli daily-journal \
+  --date 2026-04-29 \
+  --output docs/journal/generated/2026-04-29.md
+```
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `--date` | today (UTC) | Date to report on, format `YYYY-MM-DD` |
+| `--output` | stdout | File path to write the report to |
+
+The report covers:
+
+- Account snapshots recorded that day (count and types)
+- Strategy signals (totals by action, approved vs rejected, dry-run vs live)
+- Signal detail table (ticker, action, confidence, reason)
+- Top signal reasons by frequency
+- Review questions to guide your daily reflection
+
+### Manual journal entries
+
 Create one file per day under:
 
 ```text
