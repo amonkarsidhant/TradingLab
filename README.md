@@ -381,6 +381,53 @@ Each day should capture:
 - What I learned
 - Whether the strategy should continue, change, or be retired
 
+## Claude MCP Server (AI Co-pilot)
+
+Connect Claude Desktop directly to your trading lab. This gives Claude tools
+to read your account, run strategies, backtest, and place demo orders — all
+through natural language prompts.
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+pip install -e .
+
+# 2. Install the MCP server into Claude Desktop
+bash scripts/install_mcp.sh
+
+# 3. Restart Claude Desktop
+# You should see a hammer icon with 8 trading tools
+```
+
+### Available tools
+
+| Tool | What it does |
+|---|---|
+| `get_account_summary` | Read your T212 demo account (cash, equity, P&L) |
+| `get_positions` | List all open positions |
+| `run_strategy` | Generate a BUY/SELL/HOLD signal for any ticker |
+| `run_backtest` | Run a full walk-forward backtest with metrics |
+| `place_demo_order` | Place an order on T212 demo (requires `confirm=true`) |
+| `get_recent_signals` | Read your signal journal from SQLite |
+| `get_daily_journal` | Generate today's activity report |
+| `compare_strategies` | Side-by-side backtest of all 3 strategies |
+
+### Example prompts
+
+```
+"Check my demo account balance"
+"Run a backtest on NVDA with simple_momentum"
+"Compare all strategies on AAPL"
+"Place a demo order for 5 shares of AMD"  -- Claude will ask you to confirm
+```
+
+### Safety
+
+- `place_demo_order` requires `confirm=true` — Claude cannot place orders without your explicit approval
+- All orders go to T212 demo environment only
+- `ORDER_PLACEMENT_ENABLED=false` in `.env` blocks all orders
+- The MCP server enforces the same safety locks as the CLI
+
 ## Strategy comparison
 
 ```bash
