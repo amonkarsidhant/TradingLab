@@ -7,16 +7,12 @@ from rich import print
 
 from trading_lab.config import get_settings
 from trading_lab.brokers.trading212 import Trading212Client
-from trading_lab.data.market_data import (
-    CsvMarketDataProvider,
-    MarketDataProvider,
-    StaticMarketDataProvider,
-)
+from trading_lab.data.market_data import make_provider
 from trading_lab.engine import ExecutionEngine
 from trading_lab.logger import SnapshotLogger
 from trading_lab.reports.daily_journal import DailyJournal
 from trading_lab.risk import RiskPolicy
-from trading_lab.strategies.simple_momentum import SimpleMomentumStrategy
+from trading_lab.strategies import get_strategy, list_strategies
 
 app = typer.Typer(help="Sid Trading Lab CLI")
 
@@ -27,19 +23,6 @@ def get_client() -> Trading212Client:
 
 def get_logger() -> SnapshotLogger:
     return SnapshotLogger(get_settings().db_path)
-
-
-def _get_market_data_provider(
-    data_source: str, ticker: str, prices_file: str
-) -> MarketDataProvider:
-    if data_source == "static":
-        return StaticMarketDataProvider()
-    if data_source == "csv":
-        path = prices_file or f"data/market/prices/{ticker}.csv"
-        return CsvMarketDataProvider(path)
-    raise typer.BadParameter(
-        f"Unknown --data-source '{data_source}'. Use 'static' or 'csv'."
-    )
 
 
 @app.command("account-summary")
@@ -95,34 +78,74 @@ def run_strategy(
     dry_run: bool = typer.Option(True),
     data_source: str = typer.Option(
         "static",
-        help="Price data source: 'static' (offline deterministic) or 'csv' (local file).",
+        help="Price data source: 'static', 'csv', 'yfinance', or 'chained'.",
     ),
     prices_file: str = typer.Option(
         "",
-        help="Path to CSV price file (csv mode only). "
+        help="Path to CSV price file (csv/chained mode only). "
              "Defaults to data/market/prices/{ticker}.csv if not provided.",
     ),
     lookback: int = typer.Option(
         5,
-        help="Lookback window in periods for the momentum strategy.",
+        help="Lookback window in periods for the strategy.",
+    ),
+    fast: int = typer.Option(
+        10,
+        help="Fast SMA period (ma_crossover only).",
+    ),
+    slow: int = typer.Option(
+        30,
+        help="Slow SMA period (ma_crossover only).",
+    ),
+    rsi_period: int = typer.Option(
+        14,
+        help="RSI period (mean_reversion only).",
+    ),
+    oversold: int = typer.Option(
+        30,
+        help="RSI oversold threshold (mean_reversion only).",
+    ),
+    overbought: int = typer.Option(
+        70,
+        help="RSI overbought threshold (mean_reversion only).",
     ),
 ):
-    if strategy != "simple_momentum":
-        raise typer.BadParameter("Only simple_momentum exists in the starter kit.")
+    # Build strategy kwargs from the CLI options — pass only what the strategy
+    # constructor expects.  This is a simple dispatch; a proper per-strategy
+    # CLI group would be nicer but we're keeping things boring and flat.
+    strategy_kwargs: dict = {}
+    if strategy == "simple_momentum":
+        strategy_kwargs = {"lookback": lookback}
+    elif strategy == "ma_crossover":
+        strategy_kwargs = {"fast": fast, "slow": slow}
+    elif strategy == "mean_reversion":
+        strategy_kwargs = {"period": rsi_period, "oversold": oversold, "overbought": overbought}
 
-    provider = _get_market_data_provider(data_source, ticker, prices_file)
+    strat = get_strategy(strategy, **strategy_kwargs)
+
+    provider = make_provider(
+        source=data_source,
+        ticker=ticker,
+        prices_file=prices_file,
+        cache_db=get_settings().db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
     prices = provider.get_prices(ticker=ticker, lookback=lookback)
-
-    strat = SimpleMomentumStrategy(lookback=lookback)
     signal = strat.generate_signal(ticker=ticker, prices=prices)
 
     engine = ExecutionEngine(
         broker=get_client(),
         risk_policy=RiskPolicy(),
-        logger=get_logger(),  # signals are always journaled per risk-policy.md
+        logger=get_logger(),
     )
     result = engine.handle_signal(signal, dry_run=dry_run)
     print_json(result)
+
+
+@app.command("list-strategies")
+def list_strategies_cli():
+    """List all available strategies with their names."""
+    for name in sorted(list_strategies()):
+        print(f"  [bold]{name}[/bold]")
 
 
 @app.command("daily-journal")

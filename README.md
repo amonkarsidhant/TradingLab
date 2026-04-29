@@ -100,8 +100,25 @@ The Trading 212 API does not expose a general OHLC / candle historical price
 endpoint. It is used here only as the **broker and account API** (positions,
 account summary, order placement in later phases).
 
-Price data for strategy input must come from a local CSV file or a future
-external provider.
+### Data sources
+
+Four sources are available:
+
+| Source | Flag | Description |
+|---|---|---|
+| static | `--data-source static` | Built-in deterministic prices. Works offline with no files or keys. |
+| csv | `--data-source csv` | Local CSV file with `date,close` columns. |
+| yfinance | `--data-source yfinance` | Free Yahoo Finance data. Cached to local SQLite so repeated runs don't hit the network. |
+| chained | `--data-source chained` | Tries yfinance → CSV → static in sequence. The first one that succeeds wins. |
+
+The `chained` source is the recommended default for real use — it fetches live
+prices when available and falls back gracefully.
+
+### Yahoo Finance cache
+
+Data from Yahoo Finance is stored in a local SQLite file
+(`./trading_lab_cache.sqlite3` by default) so each ticker is fetched from the
+network at most once per day. The cache is checked before every API call.
 
 ### Local CSV price file format
 
@@ -122,7 +139,6 @@ The `data/` directory is gitignored. Create the file manually on your machine.
 
 ```bash
 mkdir -p data/market/prices
-# Add your own OHLC data here:
 cat > data/market/prices/AAPL_US_EQ.csv << 'EOF'
 date,close
 2026-04-15,169.50
@@ -134,11 +150,38 @@ date,close
 EOF
 ```
 
-### Running the strategy
+### Strategies
 
 ```bash
-# Offline mode — uses built-in deterministic sample prices (no files needed)
+# List all available strategies
+python -m trading_lab.cli list-strategies
+```
+
+Three strategies are available:
+
+| Name | Logic | Key parameters |
+|---|---|---|
+| `simple_momentum` | Price % change over lookback window | `--lookback` (default 5) |
+| `ma_crossover` | Fast SMA crossing above/below slow SMA | `--fast` (10), `--slow` (30) |
+| `mean_reversion` | RSI crossing oversold/overbought thresholds | `--rsi-period` (14), `--oversold` (30), `--overbought` (70) |
+
+### Running a strategy
+
+```bash
+# Offline mode — deterministic sample prices (no files or network needed)
 python -m trading_lab.cli run-strategy --data-source static --dry-run
+
+# Yahoo Finance — live prices with local cache
+python -m trading_lab.cli run-strategy \
+  --data-source yfinance \
+  --ticker AAPL \
+  --dry-run
+
+# Chained — yfinance with automatic fallback
+python -m trading_lab.cli run-strategy \
+  --data-source chained \
+  --ticker AAPL \
+  --dry-run
 
 # CSV mode — loads prices from local file
 python -m trading_lab.cli run-strategy \
@@ -152,6 +195,20 @@ python -m trading_lab.cli run-strategy \
   --ticker AAPL_US_EQ \
   --prices-file data/market/prices/AAPL_US_EQ.csv \
   --lookback 5 \
+  --dry-run
+
+# MA crossover with custom periods
+python -m trading_lab.cli run-strategy \
+  --strategy ma_crossover \
+  --fast 5 --slow 20 \
+  --data-source static \
+  --dry-run
+
+# Mean reversion with custom RSI thresholds
+python -m trading_lab.cli run-strategy \
+  --strategy mean_reversion \
+  --rsi-period 14 --oversold 25 --overbought 75 \
+  --data-source static \
   --dry-run
 ```
 

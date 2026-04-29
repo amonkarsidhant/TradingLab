@@ -3,12 +3,21 @@ Tests for market data providers.
 
 No network calls. No API keys. No Trading 212 API usage.
 CSV tests use pytest's tmp_path fixture for throwaway files.
+YFinance-like tests use in-memory SQLite cache — no real network calls.
 """
+import sqlite3
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from trading_lab.data.market_data import CsvMarketDataProvider, StaticMarketDataProvider
+from trading_lab.data.market_data import (
+    ChainedMarketDataProvider,
+    CsvMarketDataProvider,
+    StaticMarketDataProvider,
+    make_provider,
+)
+from trading_lab.data.price_cache import SqlitePriceCache
 from trading_lab.models import SignalAction
 from trading_lab.strategies.simple_momentum import SimpleMomentumStrategy
 
@@ -166,3 +175,145 @@ def test_csv_provider_with_strategy_produces_hold_when_insufficient_data(tmp_pat
 
     assert signal.action == SignalAction.HOLD
     assert "Not enough price data" in signal.reason
+
+
+# ── SqlitePriceCache ──────────────────────────────────────────────────────────
+
+def test_cache_init_creates_table(tmp_path):
+    db = str(tmp_path / "cache.sqlite3")
+    cache = SqlitePriceCache(db)
+    cache.put("TEST", [
+        {"date": "2026-04-20", "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 0},
+    ])
+    # init was called in constructor; put succeeded → table exists.
+
+
+def test_cache_put_and_get(tmp_path):
+    db = str(tmp_path / "cache.sqlite3")
+    cache = SqlitePriceCache(db)
+    bars = [
+        {"date": "2026-04-20", "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0, "volume": 1000},
+        {"date": "2026-04-21", "open": 101.0, "high": 103.0, "low": 100.0, "close": 102.0, "volume": 1100},
+    ]
+    cache.put("AAPL_US_EQ", bars)
+
+    result = cache.get("AAPL_US_EQ", "2026-04-20", "2026-04-21")
+    assert len(result) == 2
+    assert result[0]["close"] == 101.0
+    assert result[1]["close"] == 102.0
+
+
+def test_cache_get_filters_by_date_range(tmp_path):
+    db = str(tmp_path / "cache.sqlite3")
+    cache = SqlitePriceCache(db)
+    cache.put("TEST", [
+        {"date": "2026-04-20", "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 0},
+        {"date": "2026-04-21", "open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0, "volume": 0},
+        {"date": "2026-04-22", "open": 102.0, "high": 102.0, "low": 102.0, "close": 102.0, "volume": 0},
+    ])
+
+    result = cache.get("TEST", "2026-04-21", "2026-04-21")
+    assert len(result) == 1
+    assert result[0]["date"] == "2026-04-21"
+
+
+def test_cache_last_date_returns_none_for_missing_ticker(tmp_path):
+    db = str(tmp_path / "cache.sqlite3")
+    cache = SqlitePriceCache(db)
+    assert cache.last_date("MISSING") is None
+
+
+def test_cache_last_date_returns_max_date(tmp_path):
+    db = str(tmp_path / "cache.sqlite3")
+    cache = SqlitePriceCache(db)
+    cache.put("TEST", [
+        {"date": "2026-04-20", "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 0},
+        {"date": "2026-04-22", "open": 102.0, "high": 102.0, "low": 102.0, "close": 102.0, "volume": 0},
+    ])
+    assert cache.last_date("TEST") == "2026-04-22"
+
+
+def test_cache_put_overwrites_existing(tmp_path):
+    db = str(tmp_path / "cache.sqlite3")
+    cache = SqlitePriceCache(db)
+    cache.put("TEST", [
+        {"date": "2026-04-20", "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 0},
+    ])
+    cache.put("TEST", [
+        {"date": "2026-04-20", "open": 999.0, "high": 999.0, "low": 999.0, "close": 999.0, "volume": 0},
+    ])
+    result = cache.get("TEST", "2026-04-20", "2026-04-20")
+    assert len(result) == 1
+    assert result[0]["close"] == 999.0
+
+
+# ── ChainedMarketDataProvider ─────────────────────────────────────────────────
+
+def test_chained_provider_tries_first_provider(tmp_path):
+    """If the first provider returns data, use it."""
+    csv_file = tmp_path / "TEST.csv"
+    write_csv(csv_file, [
+        ("2026-04-20", 100.0),
+        ("2026-04-21", 101.0),
+        ("2026-04-22", 102.0),
+    ])
+
+    chained = ChainedMarketDataProvider([
+        CsvMarketDataProvider(str(csv_file)),
+        StaticMarketDataProvider(),
+    ])
+    prices = chained.get_prices("TEST", lookback=2)
+    assert prices == [100.0, 101.0, 102.0]
+
+
+def test_chained_provider_falls_back_on_failure(tmp_path):
+    """If the first provider fails, try the next."""
+    chained = ChainedMarketDataProvider([
+        CsvMarketDataProvider(str(tmp_path / "MISSING.csv")),
+        StaticMarketDataProvider(),
+    ])
+    prices = chained.get_prices("TEST", lookback=2)
+    assert len(prices) == 3
+    assert isinstance(prices[0], float)
+
+
+def test_chained_provider_requires_at_least_one():
+    with pytest.raises(ValueError, match="At least one"):
+        ChainedMarketDataProvider([])
+
+
+# ── make_provider factory ─────────────────────────────────────────────────────
+
+def test_make_provider_static():
+    p = make_provider("static")
+    assert isinstance(p, StaticMarketDataProvider)
+
+
+def test_make_provider_csv(tmp_path):
+    csv_file = tmp_path / "TEST.csv"
+    write_csv(csv_file, [("2026-04-20", 100.0), ("2026-04-21", 101.0)])
+    p = make_provider("csv", ticker="TEST", prices_file=str(csv_file))
+    assert isinstance(p, CsvMarketDataProvider)
+
+
+def test_make_provider_csv_defaults_path_from_ticker():
+    p = make_provider("csv", ticker="AAPL_US_EQ")
+    assert isinstance(p, CsvMarketDataProvider)
+
+
+def test_make_provider_yfinance(tmp_path):
+    db = str(tmp_path / "cache.sqlite3")
+    p = make_provider("yfinance", cache_db=db)
+    from trading_lab.data.market_data import YFinanceMarketDataProvider
+    assert isinstance(p, YFinanceMarketDataProvider)
+
+
+def test_make_provider_chained(tmp_path):
+    db = str(tmp_path / "cache.sqlite3")
+    p = make_provider("chained", cache_db=db)
+    assert isinstance(p, ChainedMarketDataProvider)
+
+
+def test_make_provider_unknown_raises():
+    with pytest.raises(ValueError, match="Unknown data source"):
+        make_provider("bloomberg")
