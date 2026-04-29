@@ -15,6 +15,9 @@ from trading_lab.data.market_data import make_provider
 from trading_lab.engine import ExecutionEngine
 from trading_lab.logger import SnapshotLogger
 from trading_lab.reports.daily_journal import DailyJournal
+from trading_lab.reports.dashboard import DashboardGenerator
+from trading_lab.reports.strategy_comparison import StrategyComparison
+from trading_lab.reports.weekly_report import WeeklyReport
 from trading_lab.risk import RiskPolicy
 from trading_lab.shadow.account import ShadowAccount
 from trading_lab.shadow.report import render_shadow_report
@@ -308,6 +311,95 @@ def shadow_report(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(report, encoding="utf-8")
         print(f"[green]Shadow report written to {output_path}[/green]")
+    else:
+        typer.echo(report)
+
+
+@app.command("dashboard")
+def dashboard(
+    ticker: str = typer.Option("AAPL_US_EQ"),
+    data_source: str = typer.Option(
+        "static",
+        help="Price data source: 'static', 'csv', 'yfinance', or 'chained'.",
+    ),
+    prices_file: str = typer.Option("", help="Path to CSV price file."),
+    output: str = typer.Option(
+        "",
+        help="Write HTML dashboard to file. Defaults to stdout.",
+    ),
+):
+    """Generate a static HTML dashboard with embedded data. No server required."""
+    generator = DashboardGenerator(
+        db_path=get_settings().db_path,
+        cache_db_path=get_settings().db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
+    html = generator.generate(
+        ticker=ticker,
+        data_source=data_source,
+        prices_file=prices_file,
+    )
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(html, encoding="utf-8")
+        print(f"[green]Dashboard written to {output_path}[/green]")
+    else:
+        typer.echo(html)
+
+
+@app.command("weekly-report")
+def weekly_report(
+    date: str = typer.Option(
+        "",
+        help="Date in the target week (YYYY-MM-DD). Defaults to today (UTC).",
+    ),
+    output: str = typer.Option(
+        "",
+        help="Write markdown report to file. Defaults to stdout.",
+    ),
+):
+    """Generate a weekly summary report aggregating one trading week (Mon-Fri)."""
+    report_date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    report = WeeklyReport(get_settings().db_path).generate(report_date)
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        print(f"[green]Weekly report written to {output_path}[/green]")
+    else:
+        typer.echo(report)
+
+
+@app.command("strategy-comparison")
+def strategy_comparison(
+    ticker: str = typer.Option("AAPL_US_EQ"),
+    data_source: str = typer.Option(
+        "static",
+        help="Price data source: 'static', 'csv', 'yfinance', or 'chained'.",
+    ),
+    prices_file: str = typer.Option("", help="Path to CSV price file."),
+    capital: float = typer.Option(10_000.0, help="Initial capital for backtests."),
+    output: str = typer.Option(
+        "",
+        help="Write markdown report to file. Defaults to stdout.",
+    ),
+):
+    """Side-by-side metrics comparing all registered strategies."""
+    comparison = StrategyComparison(
+        db_path=get_settings().db_path,
+        cache_db_path=get_settings().db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
+    report = comparison.compare(
+        ticker=ticker,
+        data_source=data_source,
+        prices_file=prices_file,
+        initial_capital=capital,
+    )
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        print(f"[green]Comparison report written to {output_path}[/green]")
     else:
         typer.echo(report)
 

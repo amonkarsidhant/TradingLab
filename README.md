@@ -380,3 +380,96 @@ Each day should capture:
 - What risk was present
 - What I learned
 - Whether the strategy should continue, change, or be retired
+
+## Strategy comparison
+
+```bash
+# Side-by-side metrics for all registered strategies
+python -m trading_lab.cli strategy-comparison --data-source static
+
+# With custom capital and ticker
+python -m trading_lab.cli strategy-comparison \
+  --ticker AAPL_US_EQ \
+  --data-source csv \
+  --prices-file data/market/prices/AAPL_US_EQ.csv \
+  --capital 5000 \
+  --output docs/reports/strategy-comparison.md
+```
+
+The report covers:
+
+- **Comparison table** — all strategies side-by-side: return, CAGR, Sharpe, max DD, win rate, profit factor, trades, wins, losses
+- **Per-strategy details** — full metrics breakdown plus equity sparkline per strategy
+- **Journaled signal counts** — what you actually recorded in the DB vs what the backtest shows
+- **Interpretation guide** — how to read profit factor, win rate vs return, and strategy fit
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `--ticker` | AAPL_US_EQ | Ticker symbol |
+| `--data-source` | static | static, csv, yfinance, or chained |
+| `--capital` | 10000 | Initial capital for backtests |
+| `--output` | stdout | Write markdown report to file path |
+
+## Dashboard
+
+```bash
+# Generate a self-contained static HTML dashboard
+python -m trading_lab.cli dashboard --data-source static
+
+# Write to file and open in browser
+python -m trading_lab.cli dashboard \
+  --ticker AAPL_US_EQ \
+  --data-source yfinance \
+  --output docs/dashboard.html
+open docs/dashboard.html
+```
+
+The dashboard is a single HTML file — no server, no CDN, no external dependencies.
+It renders:
+
+- **Strategy performance table** — color-coded returns for all strategies
+- **Equity curves** — Canvas-based multi-line chart comparing all strategies
+- **Signal heatmap** — calendar grid showing signal activity per day per strategy
+- **Recent signals** — latest 30 signals with time, ticker, action, confidence, reason
+- **Account snapshot** — latest account summary from the SQLite log
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `--ticker` | AAPL_US_EQ | Ticker symbol |
+| `--data-source` | static | static, csv, yfinance, or chained |
+| `--prices-file` | (auto) | Path to CSV price file |
+| `--output` | stdout | Write HTML dashboard to file path |
+
+## Weekly report
+
+```bash
+# Weekly summary for the current week (Mon-Fri)
+python -m trading_lab.cli weekly-report
+
+# Report for a specific week (any date in that week)
+python -m trading_lab.cli weekly-report --date 2026-04-29
+
+# Write to file
+python -m trading_lab.cli weekly-report \
+  --date 2026-04-29 \
+  --output docs/reports/weekly-2026-04-27.md
+```
+
+The report aggregates one trading week into:
+
+- **Executive summary** — total signals, snapshots, approval rates
+- **Daily breakdown** — per-strategy signal counts across Mon-Fri
+- **Signal activity by strategy** — BUY/SELL/HOLD breakdown with average confidence
+- **Ticker activity** — which tickers were most active that week
+- **Snapshots recorded** — what API data was captured
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `--date` | today (UTC) | Any date in the target week (YYYY-MM-DD) |
+| `--output` | stdout | Write markdown report to file path
