@@ -5,7 +5,10 @@ Reads account state, manages positions, executes trades, enforces constraints.
 """
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from trading_lab.brokers.trading212 import Trading212Client
 from trading_lab.config import Settings
@@ -22,6 +25,7 @@ class Position:
     current_price: float
     current_value: float
     unrealized_pnl: float
+    peak_price: float = 0.0
 
 
 @dataclass
@@ -40,12 +44,14 @@ class PortfolioManager:
     - Max positions: 10
     - Max % per position: 20% of total equity
     - Min cash reserve: 10%
+    - Trailing stop: -7% from peak price
     - Rebalance when signal turns to SELL
     """
 
     MAX_POSITIONS = 10
     MAX_PCT_PER_POSITION = 0.20
     MIN_CASH_PCT = 0.10
+    TRAILING_STOP_PCT = 0.07
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -59,9 +65,24 @@ class PortfolioManager:
             ),
             logger=self.logger,
         )
+        self._peak_path = Path("memory/position_peaks.json")
+
+    def _load_peaks(self) -> dict[str, float]:
+        """Load persisted peak prices for positions."""
+        if self._peak_path.exists():
+            try:
+                return json.loads(self._peak_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {}
+
+    def _save_peaks(self, peaks: dict[str, float]) -> None:
+        """Persist peak prices to disk."""
+        self._peak_path.parent.mkdir(parents=True, exist_ok=True)
+        self._peak_path.write_text(json.dumps(peaks, indent=2), encoding="utf-8")
 
     def state(self) -> PortfolioState:
-        """Read current account state from T212."""
+        """Read current account state from T212 and update trailing peaks."""
         summary = self.client.account_summary()
         positions_raw = self.client.positions()
 
@@ -70,18 +91,27 @@ class PortfolioManager:
         invested = summary.get("investments", {}).get("currentValue", 0)
         pnl = summary.get("investments", {}).get("unrealizedProfitLoss", 0)
 
+        peaks = self._load_peaks()
         positions = []
         for p in positions_raw:
             inst = p.get("instrument", {})
             wp = p.get("walletImpact", {})
+            ticker = inst.get("ticker", "?")
+            current_price = p.get("currentPrice", 0)
+            avg_price = p.get("averagePricePaid", 0)
+            # Update peak: max of stored peak, current price, avg price
+            peak = max(peaks.get(ticker, avg_price), current_price, avg_price)
+            peaks[ticker] = peak
             positions.append(Position(
-                ticker=inst.get("ticker", "?"),
+                ticker=ticker,
                 quantity=p.get("quantity", 0),
-                avg_price=p.get("averagePricePaid", 0),
-                current_price=p.get("currentPrice", 0),
+                avg_price=avg_price,
+                current_price=current_price,
                 current_value=wp.get("currentValue", 0),
                 unrealized_pnl=wp.get("unrealizedProfitLoss", 0),
+                peak_price=peak,
             ))
+        self._save_peaks(peaks)
 
         return PortfolioState(
             cash=cash,
@@ -90,6 +120,19 @@ class PortfolioManager:
             unrealized_pnl=pnl,
             positions=positions,
         )
+
+    def trailing_stop_hit(self, position: Position) -> bool:
+        """Check if a position has hit its trailing stop (-7% from peak)."""
+        if position.peak_price <= 0 or position.current_price <= 0:
+            return False
+        drawdown = (position.peak_price - position.current_price) / position.peak_price
+        return drawdown >= self.TRAILING_STOP_PCT
+
+    def position_drawdown(self, position: Position) -> float:
+        """Current drawdown from peak (0.0 to 1.0)."""
+        if position.peak_price <= 0:
+            return 0.0
+        return (position.peak_price - position.current_price) / position.peak_price
 
     def target_position_size(self, state: PortfolioState) -> float:
         """How much capital to allocate per new position."""
@@ -115,8 +158,13 @@ class PortfolioManager:
         return self.client.market_order(ticker=ticker, quantity=quantity, dry_run=False)
 
     def sell_position(self, position: Position) -> dict:
-        """Sell an entire position."""
-        return self.place_order(position.ticker, -position.quantity)
+        """Sell an entire position and clear its peak price."""
+        result = self.place_order(position.ticker, -position.quantity)
+        # Clear peak on successful sell
+        peaks = self._load_peaks()
+        peaks.pop(position.ticker, None)
+        self._save_peaks(peaks)
+        return result
 
     def get_open_tickers(self, state: PortfolioState | None = None) -> set[str]:
         """Set of tickers we currently hold."""

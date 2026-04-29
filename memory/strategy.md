@@ -14,11 +14,20 @@ Not day trading. Not gambling. Patient capital allocation.
 
 ## Exit Criteria
 
-1. **Stop loss** — Hard -7% from entry
+1. **Trailing stop** — -7% from peak price (not entry). Auto-adjusts as price rises.
 2. **Profit taking** — +15% = sell 50%, let rest run with trailing stop
 3. **Signal reversal** — Strategy generates SELL with > 0.60 confidence
 4. **Time stop** — No action after 30 days = reassess
 5. **Portfolio rebalance** — Position > 20% of total = trim
+
+## Dynamic Parameters
+
+Strategy parameters auto-adjust based on market regime:
+- **Bull / trending**: wider lookbacks, larger position sizes
+- **Bear / volatile**: tighter stops, smaller positions, higher cash reserve
+- **Ranging / calm**: mean reversion favored, tighter profit targets
+
+Current regime detected from VIX proxy + price volatility of SPY.
 
 ## Watchlist
 

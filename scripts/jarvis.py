@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from trading_lab.agentic.market_regime import MarketRegimeDetector
 from trading_lab.agentic.portfolio import PortfolioManager
 from trading_lab.agentic.scorer import SignalScorer
 from trading_lab.config import get_settings
@@ -39,8 +40,6 @@ WATCHLIST = [
     "INTC_US_EQ", "META_US_EQ", "CRM_US_EQ", "ADBE_US_EQ",
     "UBER_US_EQ", "COIN_US_EQ", "PLTR_US_EQ",
 ]
-
-STRATEGIES = ["simple_momentum", "ma_crossover", "mean_reversion"]
 
 
 def _t212_to_yahoo(t212_ticker: str) -> str:
@@ -65,6 +64,53 @@ def main():
 
     pm = PortfolioManager(settings)
     scorer = SignalScorer()
+    regime_detector = MarketRegimeDetector()
+
+    # 0. Detect market regime from SPY
+    print("--- Market Regime ---")
+    try:
+        provider = make_provider(
+            source="yfinance",
+            ticker="SPY",
+            cache_db=settings.db_path.replace(".sqlite3", "_cache.sqlite3"),
+        )
+        spy_prices = provider.get_prices(ticker="SPY", lookback=30)
+        regime = regime_detector.detect(spy_prices)
+        print(f"Regime: {regime.regime}")
+        print(f"  {regime.description}")
+        print(f"  Preferred strategies: {', '.join(regime.preferred_strategies)}")
+        print(f"  Position size multiplier: {regime.position_size_multiplier:.1f}x")
+        print(f"  Cash reserve multiplier: {regime.cash_reserve_multiplier:.1f}x")
+        print(f"  Trailing stop: {regime.trailing_stop_pct:.1%}")
+        strategies = regime.preferred_strategies
+    except Exception as exc:
+        print(f"Could not detect regime ({exc}). Using defaults.")
+        regime = None
+        strategies = ["simple_momentum", "ma_crossover", "mean_reversion"]
+    print()
+
+    # Build strategy kwargs from regime
+    def _strategy_kwargs(name: str) -> dict:
+        if not regime:
+            if name == "simple_momentum":
+                return {"lookback": 5}
+            if name == "ma_crossover":
+                return {"fast": 10, "slow": 30}
+            if name == "mean_reversion":
+                return {"period": 14, "oversold": 30, "overbought": 70}
+            return {}
+        if name == "simple_momentum":
+            return {"lookback": regime.momentum_lookback}
+        if name == "ma_crossover":
+            return {"fast": regime.ma_fast, "slow": regime.ma_slow}
+        if name == "mean_reversion":
+            return {"period": regime.mean_rev_period, "oversold": regime.mean_rev_oversold, "overbought": regime.mean_rev_overbought}
+        return {}
+
+    # Override PortfolioManager risk params based on regime
+    if regime:
+        pm.TRAILING_STOP_PCT = regime.trailing_stop_pct
+        pm.MIN_CASH_PCT = 0.10 * regime.cash_reserve_multiplier
 
     # 1. Read current state
     state = pm.state()
@@ -79,14 +125,28 @@ def main():
     print()
 
     target_size = pm.target_position_size(state)
+    if regime:
+        target_size *= regime.position_size_multiplier
     print(f"Target position size: €{target_size:,.2f}")
     print(f"Can add positions: {pm.can_add_position(state)}")
     print()
 
-    # 2. Check existing positions for SELL signals
+    # 2. Check existing positions for SELL signals (trailing stop first)
     sell_orders = []
     print("--- Rebalancing Existing Positions ---")
     for pos in state.positions:
+        # Check trailing stop first (-7% from peak)
+        if pm.trailing_stop_hit(pos):
+            drawdown = pm.position_drawdown(pos)
+            print(f"  {pos.ticker}: TRAILING STOP HIT (drawdown {drawdown:.1%} from peak €{pos.peak_price:.2f})")
+            try:
+                result = pm.sell_position(pos)
+                sell_orders.append((pos.ticker, result))
+                print(f"    -> SOLD ✓ (trailing stop)")
+            except Exception as exc:
+                print(f"    -> ERROR: {exc}")
+            continue
+
         yahoo_ticker = _t212_to_yahoo(pos.ticker)
         try:
             provider = make_provider(
@@ -99,15 +159,8 @@ def main():
                 print(f"  {pos.ticker}: insufficient data")
                 continue
 
-            for strat_name in STRATEGIES:
-                kwargs = {}
-                if strat_name == "simple_momentum":
-                    kwargs = {"lookback": 5}
-                elif strat_name == "ma_crossover":
-                    kwargs = {"fast": 10, "slow": 30}
-                elif strat_name == "mean_reversion":
-                    kwargs = {"period": 14, "oversold": 30, "overbought": 70}
-
+            for strat_name in strategies:
+                kwargs = _strategy_kwargs(strat_name)
                 strategy = get_strategy(strat_name, **kwargs)
                 signal = strategy.generate_signal(ticker=pos.ticker, prices=prices)
 
@@ -122,7 +175,7 @@ def main():
                         print(f"    -> ERROR: {exc}")
                     break
             else:
-                print(f"  {pos.ticker}: HOLD (no SELL signal)")
+                print(f"  {pos.ticker}: HOLD (no SELL signal, peak €{pos.peak_price:.2f})")
         except Exception as exc:
             print(f"  {pos.ticker}: ERROR — {exc}")
     print()
@@ -153,15 +206,8 @@ def main():
             if len(prices) < 5:
                 continue
 
-            for strat_name in STRATEGIES:
-                kwargs = {}
-                if strat_name == "simple_momentum":
-                    kwargs = {"lookback": 5}
-                elif strat_name == "ma_crossover":
-                    kwargs = {"fast": 10, "slow": 30}
-                elif strat_name == "mean_reversion":
-                    kwargs = {"period": 14, "oversold": 30, "overbought": 70}
-
+            for strat_name in strategies:
+                kwargs = _strategy_kwargs(strat_name)
                 strategy = get_strategy(strat_name, **kwargs)
                 signal = strategy.generate_signal(ticker=t212_ticker, prices=prices)
 
