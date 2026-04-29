@@ -24,6 +24,7 @@ class Settings:
     t212_confirm_live: str
     demo_order_confirm: str
     db_path: str
+    telegram_bot_token: str
 
     @property
     def base_url(self) -> str:
@@ -69,4 +70,5 @@ def get_settings() -> Settings:
         t212_confirm_live=os.getenv("T212_CONFIRM_LIVE", ""),
         demo_order_confirm=os.getenv("DEMO_ORDER_CONFIRM", ""),
         db_path=os.getenv("TRADING_LAB_DB", "./trading_lab.sqlite3"),
+        telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
     )

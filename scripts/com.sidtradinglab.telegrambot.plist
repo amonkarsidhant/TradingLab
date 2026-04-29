@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sidtradinglab.telegrambot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python</string>
+        <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/scripts/telegram_bot.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/src</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/logs/telegram_bot.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/logs/telegram_bot.log</string>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

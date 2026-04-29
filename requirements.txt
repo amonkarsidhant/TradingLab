@@ -7,4 +7,4 @@ rich>=13.7.0
 pytest>=8.2.0
 yfinance>=0.2.50
 mcp>=1.0.0
-
+python-telegram-bot[job-queue]>=20.0
