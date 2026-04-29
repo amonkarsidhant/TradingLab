@@ -98,6 +98,10 @@ def main():
                 return {"fast": 10, "slow": 30}
             if name == "mean_reversion":
                 return {"period": 14, "oversold": 30, "overbought": 70}
+            if name == "volume_price":
+                return {"lookback": 10, "threshold_pct": 2.0, "volume_multiplier": 1.5}
+            if name == "sentiment":
+                return {"fear_threshold": 20, "greed_threshold": 80}
             return {}
         if name == "simple_momentum":
             return {"lookback": regime.momentum_lookback}
@@ -105,6 +109,10 @@ def main():
             return {"fast": regime.ma_fast, "slow": regime.ma_slow}
         if name == "mean_reversion":
             return {"period": regime.mean_rev_period, "oversold": regime.mean_rev_oversold, "overbought": regime.mean_rev_overbought}
+        if name == "volume_price":
+            return {"lookback": regime.momentum_lookback, "threshold_pct": 2.0, "volume_multiplier": 1.5}
+        if name == "sentiment":
+            return {"fear_threshold": 20, "greed_threshold": 80}
         return {}
 
     # Override PortfolioManager risk params based on regime

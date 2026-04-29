@@ -11,6 +11,8 @@ from trading_lab.strategies.base import Strategy
 from trading_lab.strategies.simple_momentum import SimpleMomentumStrategy
 from trading_lab.strategies.ma_crossover import MovingAverageCrossoverStrategy
 from trading_lab.strategies.mean_reversion import MeanReversionStrategy
+from trading_lab.strategies.volume_price import VolumePriceStrategy
+from trading_lab.strategies.sentiment import SentimentStrategy
 
 
 def list_strategies() -> dict[str, type[Strategy]]:

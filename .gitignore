@@ -14,3 +14,5 @@ __pycache__/
 tradinglab
 tradinglab.pub
 src/*.egg-info/
+# Generated dashboard
+docs/dashboard.html
