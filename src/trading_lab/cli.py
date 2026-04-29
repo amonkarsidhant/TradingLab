@@ -7,6 +7,7 @@ from rich import print
 from trading_lab.config import get_settings
 from trading_lab.brokers.trading212 import Trading212Client
 from trading_lab.engine import ExecutionEngine
+from trading_lab.logger import SnapshotLogger
 from trading_lab.risk import RiskPolicy
 from trading_lab.strategies.simple_momentum import SimpleMomentumStrategy
 
@@ -17,26 +18,54 @@ def get_client() -> Trading212Client:
     return Trading212Client(get_settings())
 
 
+def get_logger() -> SnapshotLogger:
+    return SnapshotLogger(get_settings().db_path)
+
+
 @app.command("account-summary")
-def account_summary():
+def account_summary(
+    save_snapshot: bool = typer.Option(
+        False, "--save-snapshot", help="Write response to local SQLite snapshot log."
+    ),
+):
     client = get_client()
-    print_json(client.account_summary())
+    data = client.account_summary()
+    if save_snapshot:
+        get_logger().save_snapshot("account_summary", data)
+        print("[green]Snapshot saved.[/green]")
+    print_json(data)
 
 
 @app.command("positions")
-def positions():
+def positions(
+    save_snapshot: bool = typer.Option(
+        False, "--save-snapshot", help="Write response to local SQLite snapshot log."
+    ),
+):
     client = get_client()
-    print_json(client.positions())
+    data = client.positions()
+    if save_snapshot:
+        get_logger().save_snapshot("positions", data)
+        print("[green]Snapshot saved.[/green]")
+    print_json(data)
 
 
 @app.command("fetch-instruments")
-def fetch_instruments(output: str = "data/instruments.json"):
+def fetch_instruments(
+    output: str = "data/instruments.json",
+    save_snapshot: bool = typer.Option(
+        False, "--save-snapshot", help="Write response to local SQLite snapshot log."
+    ),
+):
     client = get_client()
     instruments = client.instruments()
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(instruments, indent=2), encoding="utf-8")
     print(f"[green]Saved instruments to {output_path}[/green]")
+    if save_snapshot:
+        get_logger().save_snapshot("instruments", instruments)
+        print("[green]Snapshot saved.[/green]")
 
 
 @app.command("run-strategy")
@@ -57,6 +86,7 @@ def run_strategy(
     engine = ExecutionEngine(
         broker=get_client(),
         risk_policy=RiskPolicy(),
+        logger=get_logger(),  # signals are always journaled per risk-policy.md
     )
     result = engine.handle_signal(signal, dry_run=dry_run)
     print_json(result)
