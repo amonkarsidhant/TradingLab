@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from dotenv import load_dotenv
 
@@ -25,6 +25,12 @@ class Settings:
     demo_order_confirm: str
     db_path: str
     telegram_bot_token: str
+    t212_auth_header: str = ""
+    t212_api_key_invest: str = ""
+    t212_api_secret_invest: str = ""
+    t212_api_key_isa: str = ""
+    t212_api_secret_isa: str = ""
+    t212_extended_hours: bool = False
 
     @property
     def base_url(self) -> str:
@@ -44,19 +50,13 @@ class Settings:
     def can_place_orders(self) -> bool:
         if not self.order_placement_enabled:
             return False
-
-        # For this starter kit, demo orders may be enabled later by changing
-        # ORDER_PLACEMENT_ENABLED=true. Live order placement remains blocked
-        # by additional confirmation.
         if self.t212_env == "demo":
             return self.demo_order_confirm == "I_ACCEPT_DEMO_ORDER_TEST"
-
         if self.t212_env == "live":
             return (
                 self.t212_allow_live
                 and self.t212_confirm_live == "I_ACCEPT_REAL_MONEY_RISK"
             )
-
         return False
 
 
@@ -71,4 +71,10 @@ def get_settings() -> Settings:
         demo_order_confirm=os.getenv("DEMO_ORDER_CONFIRM", ""),
         db_path=os.getenv("TRADING_LAB_DB", "./trading_lab.sqlite3"),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        t212_auth_header=os.getenv("T212_AUTH_HEADER", ""),
+        t212_api_key_invest=os.getenv("T212_API_KEY_INVEST", ""),
+        t212_api_secret_invest=os.getenv("T212_API_SECRET_INVEST", ""),
+        t212_api_key_isa=os.getenv("T212_API_KEY_STOCKS_ISA", ""),
+        t212_api_secret_isa=os.getenv("T212_API_SECRET_STOCKS_ISA", ""),
+        t212_extended_hours=_as_bool(os.getenv("T212_EXTENDED_HOURS"), False),
     )

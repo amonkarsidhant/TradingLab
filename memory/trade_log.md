@@ -33,7 +33,21 @@
 - Invested: €1,657.90
 - Benchmark (S&P 500): TBD
 
+## Scan Results (2026-04-30)
+
+simple_momentum scan across Core watchlist:
+- NVDA: BUY 0.95 (+6.65%) — held
+- GOOGL: BUY 0.95 (+5.26%) — held
+- AMD: BUY 0.95 (+13.61%) — held, aggressive momentum
+- AMZN: BUY 0.89 (+3.92%) — held
+- TSLA: SELL 0.77 (-2.69%) — not held
+- AAPL: BUY 0.67 (+1.71%) — below threshold
+- MSFT: BUY 0.62 (+1.20%) — below threshold
+- META: HOLD (flat)
+- ma_crossover/mean_reversion: all HOLD (insufficient data — need 31/16 pts, got 6)
+
 ## Notes
 
 All positions are US tech, momentum-chasing at local highs. Need to diversify.
 INTC entry at +27.56% momentum is aggressive — monitor closely.
+AMD at +13.61% also aggressive — set tight -7% stops on both.

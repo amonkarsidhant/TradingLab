@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mempalace": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["-m", "mempalace.mcp_server"]
+    }
+  },
+  "plugins": [
+    ".opencode/plugins/pre-trade-guard.ts",
+    ".opencode/plugins/mempalace-ingest.ts"
+  ],
+  "commands": {
+    "prefix": ".opencode/commands/"
+  }
+}

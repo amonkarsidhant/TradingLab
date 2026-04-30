@@ -20,6 +20,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from trading_lab.backtest.engine import BacktestEngine
+from trading_lab.backtest.sweep import SweepEngine
 from trading_lab.brokers.trading212 import Trading212Client
 from trading_lab.config import get_settings
 from trading_lab.data.market_data import make_provider
@@ -84,8 +85,82 @@ TOOLS = [
                 "ticker": {"type": "string", "description": "Ticker symbol to trade"},
                 "quantity": {"type": "number", "description": "Number of shares (positive=buy, negative=sell)"},
                 "confirm": {"type": "boolean", "description": "Must be true to actually place the order"},
+                "extended_hours": {"type": "boolean", "description": "Allow pre/post-market execution", "default": False},
             },
             "required": ["ticker", "quantity", "confirm"],
+        },
+    ),
+    Tool(
+        name="place_stop_order",
+        description="Place a stop order on the Trading 212 DEMO environment. Requires explicit confirmation.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Ticker symbol to trade"},
+                "quantity": {"type": "number", "description": "Number of shares (negative=sell)"},
+                "stop_price": {"type": "number", "description": "Trigger price for the stop"},
+                "confirm": {"type": "boolean", "description": "Must be true to actually place the order"},
+                "time_validity": {"type": "string", "enum": ["DAY", "GOOD_TILL_CANCEL"], "default": "DAY"},
+            },
+            "required": ["ticker", "quantity", "stop_price", "confirm"],
+        },
+    ),
+    Tool(
+        name="place_limit_order",
+        description="Place a limit order on the Trading 212 DEMO environment. Requires explicit confirmation.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Ticker symbol to trade"},
+                "quantity": {"type": "number", "description": "Number of shares (positive=buy, negative=sell)"},
+                "limit_price": {"type": "number", "description": "Limit price for the order"},
+                "confirm": {"type": "boolean", "description": "Must be true to actually place the order"},
+                "time_validity": {"type": "string", "enum": ["DAY", "GOOD_TILL_CANCEL"], "default": "DAY"},
+            },
+            "required": ["ticker", "quantity", "limit_price", "confirm"],
+        },
+    ),
+    Tool(
+        name="lookup_ticker",
+        description="Search for a Trading 212 ticker by company name or symbol.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Company name or symbol, e.g. 'Apple' or 'TSLA'"},
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
+        name="get_pending_orders",
+        description="List all pending/open orders in your Trading 212 demo account.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="cancel_pending_order",
+        description="Cancel a pending order by ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "integer", "description": "Order ID to cancel"},
+                "confirm": {"type": "boolean", "description": "Must be true to actually cancel"},
+            },
+            "required": ["order_id", "confirm"],
+        },
+    ),
+    Tool(
+        name="run_param_sweep",
+        description="Run a parameter sweep — test many strategy parameter combos and find the best.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "strategy": {"type": "string", "description": "Strategy name: simple_momentum, ma_crossover, mean_reversion"},
+                "ticker": {"type": "string", "description": "Ticker symbol"},
+                "data_source": {"type": "string", "enum": ["static", "csv", "yfinance", "chained"], "default": "static"},
+                "capital": {"type": "number", "description": "Initial capital", "default": 10000},
+                "rank_by": {"type": "string", "enum": ["sharpe_ratio", "profit_factor", "total_return_pct", "win_rate"], "default": "sharpe_ratio"},
+            },
+            "required": ["strategy", "ticker"],
         },
     ),
     Tool(
@@ -227,6 +302,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         ticker = arguments["ticker"]
         quantity = arguments["quantity"]
         confirm = arguments.get("confirm", False)
+        extended_hours = arguments.get("extended_hours", False)
 
         if not confirm:
             return [TextContent(
@@ -248,8 +324,166 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )]
 
         client = _client()
-        result = client.market_order(ticker=ticker, quantity=quantity, dry_run=False)
+        result = client.market_order(
+            ticker=ticker, quantity=quantity, dry_run=False,
+            extended_hours=extended_hours,
+        )
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+
+    # ── Place Stop Order ────────────────────────────────────────────────────
+    if name == "place_stop_order":
+        ticker = arguments["ticker"]
+        quantity = arguments["quantity"]
+        stop_price = arguments["stop_price"]
+        confirm = arguments.get("confirm", False)
+        time_validity = arguments.get("time_validity", "DAY")
+
+        if not confirm:
+            return [TextContent(
+                type="text",
+                text=(
+                    "SAFETY: Stop order NOT placed. You must set confirm=true.\n"
+                    f"Would place: stop {quantity} shares of {ticker} "
+                    f"at stop price {stop_price} on DEMO environment."
+                ),
+            )]
+
+        if not settings.can_place_orders:
+            return [TextContent(
+                type="text",
+                text="ERROR: Order placement is disabled."
+            )]
+
+        client = _client()
+        result = client.stop_order(
+            ticker=ticker, quantity=quantity, stop_price=stop_price,
+            dry_run=False, time_validity=time_validity,
+        )
+        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+
+    # ── Place Limit Order ───────────────────────────────────────────────────
+    if name == "place_limit_order":
+        ticker = arguments["ticker"]
+        quantity = arguments["quantity"]
+        limit_price = arguments["limit_price"]
+        confirm = arguments.get("confirm", False)
+        time_validity = arguments.get("time_validity", "DAY")
+
+        if not confirm:
+            return [TextContent(
+                type="text",
+                text=(
+                    "SAFETY: Limit order NOT placed. You must set confirm=true.\n"
+                    f"Would place: limit {quantity} shares of {ticker} "
+                    f"at limit price {limit_price} on DEMO environment."
+                ),
+            )]
+
+        if not settings.can_place_orders:
+            return [TextContent(
+                type="text",
+                text="ERROR: Order placement is disabled."
+            )]
+
+        client = _client()
+        result = client.limit_order(
+            ticker=ticker, quantity=quantity, limit_price=limit_price,
+            dry_run=False, time_validity=time_validity,
+        )
+        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+
+    # ── Lookup Ticker ───────────────────────────────────────────────────────
+    if name == "lookup_ticker":
+        query = arguments["query"]
+        client = _client()
+        results = client.lookup_ticker(query)
+        if not results:
+            return [TextContent(type="text", text="No instruments found.")]
+        summary = [
+            {
+                "ticker": inst.get("ticker"),
+                "name": inst.get("name"),
+                "shortName": inst.get("shortName"),
+                "currencyCode": inst.get("currencyCode"),
+                "type": inst.get("type"),
+            }
+            for inst in results[:20]
+        ]
+        return [TextContent(type="text", text=json.dumps(summary, indent=2, default=str))]
+
+    # ── Pending Orders ──────────────────────────────────────────────────────
+    if name == "get_pending_orders":
+        client = _client()
+        data = client.pending_orders()
+        return [TextContent(type="text", text=json.dumps(data or [], indent=2, default=str))]
+
+    # ── Cancel Order ────────────────────────────────────────────────────────
+    if name == "cancel_pending_order":
+        order_id = arguments["order_id"]
+        confirm = arguments.get("confirm", False)
+        if not confirm:
+            return [TextContent(
+                type="text",
+                text=f"SAFETY: Cancel NOT executed. Set confirm=true to cancel order {order_id}."
+            )]
+        client = _client()
+        result = client.cancel_order(order_id)
+        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+
+    # ── Param Sweep ─────────────────────────────────────────────────────────
+    if name == "run_param_sweep":
+        strat_name = arguments["strategy"]
+        ticker = arguments["ticker"]
+        source = arguments.get("data_source", "static")
+        capital = arguments.get("capital", 10_000.0)
+        rank_by = arguments.get("rank_by", "sharpe_ratio")
+
+        cls = list_strategies().get(strat_name)
+        if not cls:
+            return [TextContent(type="text", text=f"Unknown strategy: {strat_name}")]
+
+        provider = make_provider(
+            source=source, ticker=ticker,
+            cache_db=settings.db_path.replace(".sqlite3", "_cache.sqlite3"),
+        )
+        prices = provider.get_prices(ticker=ticker, lookback=252)
+
+        grids = {
+            "simple_momentum": {
+                "lookback": [3, 5, 7, 10, 14, 20],
+                "threshold_pct": [0.5, 1.0, 2.0, 3.0],
+            },
+            "ma_crossover": {
+                "fast": [5, 8, 13],
+                "slow": [21, 34, 55],
+            },
+            "mean_reversion": {
+                "period": [7, 14, 21],
+                "oversold": [20, 25, 30],
+                "overbought": [65, 70, 75],
+            },
+        }
+        grid = grids.get(strat_name, {})
+
+        engine = SweepEngine(cls, param_grid=grid, rank_by=rank_by, capital=capital)
+        result = engine.run(prices=prices, ticker=ticker)
+
+        summary = {
+            "strategy": strat_name,
+            "ticker": ticker,
+            "combinations_tested": len(result.results),
+            "ranked_by": rank_by,
+            "best_params": result.best_params,
+            "best_metrics": {
+                "total_return_pct": result.best.metrics.get("total_return_pct"),
+                "sharpe_ratio": result.best.metrics.get("sharpe_ratio"),
+                "max_drawdown_pct": result.best.metrics.get("max_drawdown_pct"),
+                "win_rate": result.best.metrics.get("win_rate"),
+                "profit_factor": result.best.metrics.get("profit_factor"),
+                "total_trades": result.best.metrics.get("total_trades"),
+            } if result.best else None,
+        }
+        return [TextContent(type="text", text=json.dumps(summary, indent=2, default=str))]
 
     # ── Recent Signals ────────────────────────────────────────────────────────
     if name == "get_recent_signals":

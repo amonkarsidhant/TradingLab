@@ -9,6 +9,8 @@ from trading_lab.agents.pipeline import ReviewPipeline, render_review_report
 from trading_lab.agents.runner import AgentRunner, detect_provider
 from trading_lab.backtest.engine import BacktestEngine
 from trading_lab.backtest.report import render_report
+from trading_lab.backtest.sweep import SweepEngine
+from trading_lab.backtest.sweep_report import render_sweep_report
 from trading_lab.config import get_settings
 from trading_lab.brokers.trading212 import Trading212Client
 from trading_lab.data.market_data import make_provider
@@ -143,6 +145,101 @@ def run_strategy(
     print_json(result)
 
 
+@app.command("place-stop-order")
+def place_stop_order(
+    ticker: str = typer.Option(..., help="Ticker symbol, e.g. AAPL_US_EQ"),
+    quantity: float = typer.Option(..., help="Positive to buy, negative to sell."),
+    stop_price: float = typer.Option(..., help="Stop trigger price."),
+    dry_run: bool = typer.Option(True),
+    time_validity: str = typer.Option("DAY", help="DAY or GOOD_TILL_CANCEL"),
+    save_snapshot: bool = typer.Option(False, "--save-snapshot"),
+):
+    """Place a stop order on the Trading 212 demo environment."""
+    client = get_client()
+    result = client.stop_order(
+        ticker=ticker,
+        quantity=quantity,
+        stop_price=stop_price,
+        dry_run=dry_run,
+        time_validity=time_validity,
+    )
+    if save_snapshot:
+        get_logger().save_snapshot("stop_order", result)
+        print("[green]Snapshot saved.[/green]")
+    print_json(result)
+
+
+@app.command("place-limit-order")
+def place_limit_order(
+    ticker: str = typer.Option(..., help="Ticker symbol, e.g. AAPL_US_EQ"),
+    quantity: float = typer.Option(..., help="Positive to buy, negative to sell."),
+    limit_price: float = typer.Option(..., help="Limit price for the order."),
+    dry_run: bool = typer.Option(True),
+    time_validity: str = typer.Option("DAY", help="DAY or GOOD_TILL_CANCEL"),
+    save_snapshot: bool = typer.Option(False, "--save-snapshot"),
+):
+    """Place a limit order on the Trading 212 demo environment."""
+    client = get_client()
+    result = client.limit_order(
+        ticker=ticker,
+        quantity=quantity,
+        limit_price=limit_price,
+        dry_run=dry_run,
+        time_validity=time_validity,
+    )
+    if save_snapshot:
+        get_logger().save_snapshot("limit_order", result)
+        print("[green]Snapshot saved.[/green]")
+    print_json(result)
+
+
+@app.command("lookup-ticker")
+def lookup_ticker(
+    query: str = typer.Argument(..., help="Company name or symbol, e.g. 'Apple' or 'TSLA'"),
+):
+    """Look up a T212 ticker from a company name or symbol."""
+    client = get_client()
+    results = client.lookup_ticker(query)
+    if not results:
+        print("[red]No instruments found.[/red]")
+        return
+    for inst in results:
+        print(f"  [bold]{inst.get('ticker')}[/bold]  {inst.get('name')}  ({inst.get('currencyCode', '?')})")
+
+
+@app.command("cancel-order")
+def cancel_order(
+    order_id: int = typer.Argument(..., help="Order ID to cancel."),
+):
+    """Cancel a pending order by ID."""
+    client = get_client()
+    result = client.cancel_order(order_id)
+    print("[green]Cancellation submitted.[/green]")
+    print_json(result)
+
+
+@app.command("pending-orders")
+def pending_orders():
+    """List all pending / open orders."""
+    client = get_client()
+    data = client.pending_orders()
+    if not data:
+        print("[dim]No pending orders.[/dim]")
+        return
+    print_json(data)
+
+
+@app.command("history-orders")
+def history_orders(
+    ticker: str = typer.Option("", help="Filter by ticker."),
+    limit: int = typer.Option(50),
+):
+    """Fetch historical filled orders from Trading 212."""
+    client = get_client()
+    items = client.history_orders(ticker=ticker, limit=limit)
+    print_json(items)
+
+
 @app.command("list-strategies")
 def list_strategies_cli():
     """List all available strategies with their names."""
@@ -210,6 +307,66 @@ def _build_strategy_kwargs(name: str, **all_kwargs) -> dict:
             "period": all_kwargs["rsi_period"],
             "oversold": all_kwargs["oversold"],
             "overbought": all_kwargs["overbought"],
+        }
+    return {}
+
+
+@app.command("param-sweep")
+def param_sweep(
+    strategy: str = typer.Option("simple_momentum"),
+    ticker: str = typer.Option("AAPL_US_EQ"),
+    data_source: str = typer.Option("static", help="static, csv, yfinance, or chained."),
+    prices_file: str = typer.Option("", help="Path to CSV price file."),
+    capital: float = typer.Option(10_000.0, help="Initial capital for backtests."),
+    rank_by: str = typer.Option(
+        "sharpe_ratio",
+        help="Metric to rank by: sharpe_ratio, profit_factor, total_return_pct, win_rate.",
+    ),
+    output: str = typer.Option("", help="Write markdown report to file. Defaults to stdout."),
+):
+    """Run a parameter sweep — test many strategy parameter combos and find the best."""
+    cls = list_strategies().get(strategy)
+    if not cls:
+        print(f"[red]Unknown strategy '{strategy}'.[/red]")
+        raise typer.Exit(1)
+
+    provider = make_provider(
+        source=data_source, ticker=ticker, prices_file=prices_file,
+        cache_db=get_settings().db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
+    prices = provider.get_prices(ticker=ticker, lookback=252)
+
+    grid = _default_grid(strategy)
+
+    engine = SweepEngine(cls, param_grid=grid, rank_by=rank_by, capital=capital)
+    result = engine.run(prices=prices, ticker=ticker)
+
+    report = render_sweep_report(result)
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        print(f"[green]Sweep report written to {output_path}[/green]")
+    else:
+        typer.echo(report)
+
+
+def _default_grid(strategy: str) -> dict:
+    if strategy == "simple_momentum":
+        return {
+            "lookback": [3, 5, 7, 10, 14, 20],
+            "threshold_pct": [0.5, 1.0, 2.0, 3.0],
+        }
+    if strategy == "ma_crossover":
+        return {
+            "fast": [5, 8, 13],
+            "slow": [21, 34, 55],
+        }
+    if strategy == "mean_reversion":
+        return {
+            "period": [7, 14, 21],
+            "oversold": [20, 25, 30],
+            "overbought": [65, 70, 75],
         }
     return {}
 

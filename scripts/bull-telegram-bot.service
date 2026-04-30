@@ -1,0 +1,28 @@
+[Unit]
+Description=Bull Telegram Bot — Sid Trading Lab
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sid-trading-lab
+Environment=PYTHONPATH=/opt/sid-trading-lab/src
+ExecStart=/opt/sid-trading-lab/.venv/bin/python /opt/sid-trading-lab/src/trading_lab/telegram_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/sid-trading-lab/logs/telegram_bot.log
+StandardError=append:/opt/sid-trading-lab/logs/telegram_bot.log
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/sid-trading-lab/logs /opt/sid-trading-lab/memory /opt/sid-trading-lab/trading_lab.sqlite3
+
+[Install]
+WantedBy=multi-user.target

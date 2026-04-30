@@ -6,7 +6,6 @@ Reads account state, manages positions, executes trades, enforces constraints.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +25,11 @@ class Position:
     current_value: float
     unrealized_pnl: float
     peak_price: float = 0.0
+    quantity_available: float = 0.0
+    quantity_in_pies: float = 0.0
+    fx_impact: float = 0.0
+    account_currency: str = ""
+    instrument_currency: str = ""
 
 
 @dataclass
@@ -35,6 +39,7 @@ class PortfolioState:
     invested_value: float
     unrealized_pnl: float
     positions: list[Position]
+    account_currency: str = ""
 
 
 class PortfolioManager:
@@ -62,13 +67,13 @@ class PortfolioManager:
             risk_policy=RiskPolicy(
                 max_quantity_per_order=100.0,
                 min_confidence_to_trade=0.50,
+                trailing_stop_pct=self.TRAILING_STOP_PCT,
             ),
             logger=self.logger,
         )
         self._peak_path = Path("memory/position_peaks.json")
 
     def _load_peaks(self) -> dict[str, float]:
-        """Load persisted peak prices for positions."""
         if self._peak_path.exists():
             try:
                 return json.loads(self._peak_path.read_text(encoding="utf-8"))
@@ -77,12 +82,10 @@ class PortfolioManager:
         return {}
 
     def _save_peaks(self, peaks: dict[str, float]) -> None:
-        """Persist peak prices to disk."""
         self._peak_path.parent.mkdir(parents=True, exist_ok=True)
         self._peak_path.write_text(json.dumps(peaks, indent=2), encoding="utf-8")
 
     def state(self) -> PortfolioState:
-        """Read current account state from T212 and update trailing peaks."""
         summary = self.client.account_summary()
         positions_raw = self.client.positions()
 
@@ -90,6 +93,7 @@ class PortfolioManager:
         total = summary.get("totalValue", 0)
         invested = summary.get("investments", {}).get("currentValue", 0)
         pnl = summary.get("investments", {}).get("unrealizedProfitLoss", 0)
+        account_currency = summary.get("currency", "")
 
         peaks = self._load_peaks()
         positions = []
@@ -99,7 +103,6 @@ class PortfolioManager:
             ticker = inst.get("ticker", "?")
             current_price = p.get("currentPrice", 0)
             avg_price = p.get("averagePricePaid", 0)
-            # Update peak: max of stored peak, current price, avg price
             peak = max(peaks.get(ticker, avg_price), current_price, avg_price)
             peaks[ticker] = peak
             positions.append(Position(
@@ -110,6 +113,11 @@ class PortfolioManager:
                 current_value=wp.get("currentValue", 0),
                 unrealized_pnl=wp.get("unrealizedProfitLoss", 0),
                 peak_price=peak,
+                quantity_available=p.get("quantityAvailableForTrading", 0),
+                quantity_in_pies=p.get("quantityInPies", 0),
+                fx_impact=wp.get("fxImpact", 0),
+                account_currency=wp.get("currency", account_currency),
+                instrument_currency=inst.get("currency", ""),
             ))
         self._save_peaks(peaks)
 
@@ -119,23 +127,21 @@ class PortfolioManager:
             invested_value=invested,
             unrealized_pnl=pnl,
             positions=positions,
+            account_currency=account_currency,
         )
 
     def trailing_stop_hit(self, position: Position) -> bool:
-        """Check if a position has hit its trailing stop (-7% from peak)."""
         if position.peak_price <= 0 or position.current_price <= 0:
             return False
         drawdown = (position.peak_price - position.current_price) / position.peak_price
         return drawdown >= self.TRAILING_STOP_PCT
 
     def position_drawdown(self, position: Position) -> float:
-        """Current drawdown from peak (0.0 to 1.0)."""
         if position.peak_price <= 0:
             return 0.0
         return (position.peak_price - position.current_price) / position.peak_price
 
     def target_position_size(self, state: PortfolioState) -> float:
-        """How much capital to allocate per new position."""
         max_per_pos = state.total_value * self.MAX_PCT_PER_POSITION
         min_cash_reserve = state.total_value * self.MIN_CASH_PCT
         deployable = max(0, state.cash - min_cash_reserve)
@@ -143,7 +149,6 @@ class PortfolioManager:
         return min(max_per_pos, deployable / slots)
 
     def can_add_position(self, state: PortfolioState) -> bool:
-        """Check if we can add another position."""
         if len(state.positions) >= self.MAX_POSITIONS:
             return False
         min_cash = state.total_value * self.MIN_CASH_PCT
@@ -152,22 +157,27 @@ class PortfolioManager:
         return True
 
     def place_order(self, ticker: str, quantity: float) -> dict:
-        """Place a demo market order."""
         if not self.settings.can_place_orders:
             raise RuntimeError("Order placement disabled in config")
         return self.client.market_order(ticker=ticker, quantity=quantity, dry_run=False)
 
+    def place_stop_order(
+        self, ticker: str, quantity: float, stop_price: float
+    ) -> dict:
+        if not self.settings.can_place_orders:
+            raise RuntimeError("Order placement disabled in config")
+        return self.client.stop_order(
+            ticker=ticker, quantity=quantity, stop_price=stop_price, dry_run=False
+        )
+
     def sell_position(self, position: Position) -> dict:
-        """Sell an entire position and clear its peak price."""
-        result = self.place_order(position.ticker, -position.quantity)
-        # Clear peak on successful sell
+        result = self.place_order(position.ticker, -position.quantity_available or -position.quantity)
         peaks = self._load_peaks()
         peaks.pop(position.ticker, None)
         self._save_peaks(peaks)
         return result
 
     def get_open_tickers(self, state: PortfolioState | None = None) -> set[str]:
-        """Set of tickers we currently hold."""
         if state is None:
             state = self.state()
         return {p.ticker for p in state.positions}
