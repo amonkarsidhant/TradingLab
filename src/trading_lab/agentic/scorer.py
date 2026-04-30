@@ -1,75 +1,67 @@
 """
-SignalScorer — multi-factor scoring for trade signals.
-
-Scores each signal by combining:
-1. Strategy confidence (0-1)
-2. Backtest quality (Sharpe ratio normalized)
-3. Price momentum strength (% move magnitude)
-4. Win rate from backtest
-
-Higher score = more attractive trade.
+EntryScorer — ranks ticker+strategy combinations by objective data,
+not AI comfort. Uses factsheet metrics to produce a composite score.
 """
 from __future__ import annotations
 
-from trading_lab.backtest.engine import BacktestEngine
-from trading_lab.models import Signal
+from trading_lab.data.market_data import make_provider
+from trading_lab.factsheet.engine import FactsheetEngine, _parameter_stability
 
 
-class SignalScorer:
-    """Score trade signals using multi-factor analysis."""
+class EntryScorer:
+    """Scores a ticker+strategy combination using factsheet data.
 
-    def score(self, signal: Signal, prices: list[float]) -> float:
-        """Return a composite score (0-100) for a signal.
+    Factors (each 0-25 points, total 0-100):
+    - Sharpe ratio (0-25)
+    - Profit factor (0-25)
+    - Parameter stability CV (0-25)
+    - Outperformance vs buy-and-hold (0-25)
+    """
 
-        Factors:
-        - confidence (0-1) → 0-40 points
-        - momentum strength (% move) → 0-30 points
-        - backtest Sharpe (if computable) → 0-30 points
-        """
-        confidence_score = min(signal.confidence, 1.0) * 40
+    def score(self, strategy_name: str, ticker: str, capital: float = 10_000.0) -> dict:
+        engine = FactsheetEngine(strategy_name, ticker, capital)
+        provider = make_provider(
+            source="chained", ticker=ticker,
+            cache_db="./trading_lab_cache.sqlite3",
+        )
+        prices = provider.get_prices(ticker=ticker, lookback=252)
+        data = engine.generate(prices=prices)
+        m = data["backtest"]["metrics"]
+        bench = data["benchmark"]
+        stab = data["parameter_stability"]
 
-        # Momentum strength: bigger % move = higher score (capped)
-        if len(prices) >= 2:
-            pct_move = (prices[-1] - prices[0]) / prices[0] * 100
-            momentum_score = min(abs(pct_move) * 2, 30)  # 15% move = max score
-        else:
-            momentum_score = 0
+        sharpe = m.get("sharpe_ratio") or 0
+        pf = m.get("profit_factor")
+        outperf = bench.get("outperformance_pct") or 0
 
-        # Backtest Sharpe (quick backtest on recent data)
-        sharpe_score = self._estimate_sharpe(signal, prices)
+        cv = stab.get("cv")
+        stable = stab.get("stable_range", False)
 
-        total = confidence_score + momentum_score + sharpe_score
-        return round(total, 2)
+        sharpe_score = min(max((sharpe / 2.0) * 25, 0), 25)
+        pf_score = min(max((pf or 0) * 10, 0), 25) if pf else 0
+        stab_score = 25 if stable else (12.5 if cv is not None and cv < 2.0 else 0)
+        outp_score = min(max((outperf / 10.0) * 25, 0), 25)
 
-    def _estimate_sharpe(self, signal: Signal, prices: list[float]) -> float:
-        """Quick backtest on recent prices to estimate Sharpe."""
-        if len(prices) < 20:
-            return 15  # neutral mid-point
+        total = round(sharpe_score + pf_score + stab_score + outp_score, 1)
 
-        try:
-            from trading_lab.strategies import get_strategy
+        return {
+            "strategy": strategy_name,
+            "ticker": ticker,
+            "score": total,
+            "factors": {
+                "sharpe": {"raw": sharpe, "score": round(sharpe_score, 1)},
+                "profit_factor": {"raw": pf, "score": round(pf_score, 1)},
+                "stability": {"raw": cv, "score": round(stab_score, 1), "stable": stable},
+                "outperformance": {"raw": round(outperf, 2), "score": round(outp_score, 1)},
+            },
+            "verdict": data["verdict"],
+        }
 
-            kwargs = {}
-            if signal.strategy == "simple_momentum":
-                kwargs = {"lookback": 5}
-            elif signal.strategy == "ma_crossover":
-                kwargs = {"fast": 10, "slow": 30}
-            elif signal.strategy == "mean_reversion":
-                kwargs = {"period": 14, "oversold": 30, "overbought": 70}
-
-            strategy = get_strategy(signal.strategy, **kwargs)
-            engine = BacktestEngine(strategy, initial_capital=10000.0)
-            result = engine.run(prices=prices, ticker=signal.ticker)
-            sharpe = result.metrics.get("sharpe_ratio")
-            if sharpe is None:
-                return 15
-            # Normalize Sharpe: 0→15, 1→22, 2→30 (cap at 30)
-            return min(15 + sharpe * 7.5, 30)
-        except Exception:
-            return 15
-
-    def rank(self, candidates: list[tuple[Signal, list[float]]]) -> list[tuple[Signal, float]]:
-        """Rank signals by score, highest first."""
-        scored = [(signal, self.score(signal, prices)) for signal, prices in candidates]
-        scored.sort(key=lambda x: x[1], reverse=True)
+    def rank(
+        self,
+        candidates: list[tuple[str, str]],
+        capital: float = 10_000.0,
+    ) -> list[dict]:
+        scored = [self.score(s, t, capital) for s, t in candidates]
+        scored.sort(key=lambda x: x["score"], reverse=True)
         return scored

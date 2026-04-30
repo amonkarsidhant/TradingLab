@@ -6,7 +6,9 @@ import typer
 from rich import print
 
 from trading_lab.agents.pipeline import ReviewPipeline, render_review_report
+from trading_lab.agentic.cash import CashAllocator
 from trading_lab.agentic.reflection import MungerReflectionEngine
+from trading_lab.agentic.scorer import EntryScorer
 from trading_lab.agents.runner import AgentRunner, detect_provider
 from trading_lab.backtest.engine import BacktestEngine
 from trading_lab.backtest.report import render_report
@@ -936,6 +938,59 @@ def daily_journal(
         print(f"[green]Journal written to {output_path}[/green]")
     else:
         typer.echo(report)
+
+
+@app.command("scan-rank")
+def scan_rank(
+    strategy: str = typer.Option("simple_momentum", help="Strategy to score candidates on"),
+    tickers: str = typer.Option("AAPL_US_EQ,MSFT_US_EQ,NVDA_US_EQ,GOOGL_US_EQ,AMZN_US_EQ,META_US_EQ,TSLA_US_EQ,AMD_US_EQ,KO_US_EQ,JNJ_US_EQ,PG_US_EQ,V_US_EQ,MA_US_EQ", help="Comma-separated tickers to rank"),
+    capital: float = typer.Option(10_000.0, help="Capital for backtest"),
+    top_n: int = typer.Option(5, help="Show top N results"),
+):
+    """Rank ticker+strategy combinations by objective factsheet data, not AI comfort."""
+    ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    candidates = [(strategy, t) for t in ticker_list]
+    scorer = EntryScorer()
+    print(f"[dim]Scoring {len(candidates)} candidates with {strategy}...[/dim]")
+    results = scorer.rank(candidates, capital)
+    print(f"\n[bold]Top {min(top_n, len(results))} of {len(results)} candidates:[/bold]\n")
+    print(f"{'Rank':<5} {'Ticker':<20} {'Score':<8} {'Sharpe':<8} {'PF':<6} {'Stable':<8} {'Outperf':<8} {'Verdict':<10}")
+    print("-" * 75)
+    for i, r in enumerate(results[:top_n], 1):
+        f = r["factors"]
+        print(f"{i:<5} {r['ticker']:<20} {r['score']:<8} {f['sharpe']['raw']:<8} {str(f['profit_factor']['raw'] or '-'):<6} {'Y' if f['stability']['stable'] else 'N':<8} {f['outperformance']['raw']:<8} {r['verdict']:<10}")
+
+
+@app.command("allocate")
+def allocate(
+    save_snapshot: bool = typer.Option(False, "--save-snapshot"),
+):
+    """Check current cash allocation against regime target and recommend deployment."""
+    settings = get_settings()
+    from trading_lab.brokers.trading212 import Trading212Client
+    client = Trading212Client(settings)
+    summary = client.account_summary()
+    total = summary.get("totalValue", 0)
+    cash = summary.get("cash", {}).get("availableToTrade", 0)
+    positions_raw = client.positions()
+    pos_count = len(positions_raw)
+    allocator = CashAllocator(
+        cache_db=settings.db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
+    result = allocator.analyze(total, cash, pos_count)
+    print(f"[bold]Regime:[/bold] {result['regime']}")
+    print(f"  {result['regime_description']}")
+    print(f"[bold]Cash:[/bold] {result['actual_cash_pct']}% (target: {result['target_cash_pct']}%)")
+    print(f"  Gap: {result['gap_pct']:+.1f}% (€{result['gap_value']:+,.2f})")
+    print(f"[bold]Action:[/bold] {result['action']}")
+    print(f"  Free slots: {result['free_slots']}")
+    print(f"  Deployable per slot: €{result['deployable_per_slot']:,.2f}")
+    print(f"  Max position size: {result['max_position_pct']}%")
+    print(f"  Recommended stop: {result['recommended_stop_pct']}%")
+    print(f"  Preferred strategies: {', '.join(result['preferred_strategies'])}")
+    if save_snapshot:
+        get_logger().save_snapshot("allocation", result)
+        print("[green]Snapshot saved.[/green]")
 
 
 def print_json(data):
