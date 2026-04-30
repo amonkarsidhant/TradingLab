@@ -1,14 +1,26 @@
 from trading_lab.models import Signal, SignalAction
-from trading_lab.strategies.base import Strategy
+from trading_lab.strategies.base import Strategy, StrategyMetadata
 
 
 class MeanReversionStrategy(Strategy):
-    """BUY when RSI crosses below oversold. SELL when RSI crosses above overbought.
-
-    Uses Wilder's smoothing for the RSI calculation.
-    """
-
     name = "mean_reversion"
+    metadata = StrategyMetadata(
+        name="mean_reversion",
+        category="mean_reversion",
+        hypothesis="Extreme price moves in one direction are likely to revert toward the mean. RSI below oversold signals a bounce; above overbought signals a pullback.",
+        expected_market_regime="ranging_calm",
+        failure_modes=[
+            "Catastrophic losses in strong trends: buying dips in a bear market (catching falling knives)",
+            "RSI can stay overbought/oversold for extended periods during strong trends",
+            "Fails in low-volatility markets where RSI rarely crosses thresholds",
+        ],
+        parameters={
+            "period": (14, "RSI calculation period (Wilder's smoothing)"),
+            "oversold": (30, "RSI threshold for oversold condition"),
+            "overbought": (70, "RSI threshold for overbought condition"),
+        },
+        required_data="close",
+    )
 
     def __init__(self, period: int = 14, oversold: int = 30, overbought: int = 70):
         if oversold >= overbought:

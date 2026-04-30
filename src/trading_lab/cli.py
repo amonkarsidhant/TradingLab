@@ -16,6 +16,8 @@ from trading_lab.config import get_settings
 from trading_lab.brokers.trading212 import OrderType, Trading212Client
 from trading_lab.data.market_data import make_provider
 from trading_lab.engine import ExecutionEngine
+from trading_lab.factsheet.engine import FactsheetEngine
+from trading_lab.factsheet.report import render_factsheet
 from trading_lab.logger import SnapshotLogger
 from trading_lab.reports.daily_journal import DailyJournal
 from trading_lab.reports.dashboard import DashboardGenerator
@@ -151,6 +153,32 @@ def run_strategy(
     )
     result = engine.handle_signal(signal, dry_run=dry_run)
     print_json(result)
+
+
+@app.command("strategy-factsheet")
+def strategy_factsheet(
+    strategy: str = typer.Option("simple_momentum", help="Strategy name to evaluate"),
+    ticker: str = typer.Option("AAPL_US_EQ", help="Ticker symbol"),
+    capital: float = typer.Option(10_000.0, help="Initial capital for backtests"),
+    output: str = typer.Option("", help="Write factsheet to file. Defaults to stdout."),
+):
+    """Generate a comprehensive strategy factsheet with benchmark, cost sensitivity, and stability."""
+    engine = FactsheetEngine(strategy, ticker, capital)
+    from trading_lab.data.market_data import make_provider
+    provider = make_provider(
+        source="chained", ticker=ticker,
+        cache_db=get_settings().db_path.replace(".sqlite3", "_cache.sqlite3"),
+    )
+    prices = provider.get_prices(ticker=ticker, lookback=252)
+    data = engine.generate(prices=prices)
+    report = render_factsheet(data)
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        print(f"[green]Factsheet written to {output_path}[/green]")
+    else:
+        typer.echo(report)
 
 
 @app.command("place-stop-order")

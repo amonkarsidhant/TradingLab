@@ -16,11 +16,11 @@ from trading_lab.strategies.sentiment import SentimentStrategy
 
 
 def list_strategies() -> dict[str, type[Strategy]]:
-    """Return {name: StrategyClass} for every concrete strategy."""
+    """Return {name: StrategyClass} for every concrete strategy that has metadata."""
     result: dict[str, type[Strategy]] = {}
     for cls in Strategy.__subclasses__():
         name = getattr(cls, "name", cls.__name__)
-        if name:
+        if name and hasattr(cls, "metadata") and cls.metadata is not None:
             result[name] = cls
     return result
 

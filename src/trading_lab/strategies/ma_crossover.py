@@ -1,11 +1,25 @@
 from trading_lab.models import Signal, SignalAction
-from trading_lab.strategies.base import Strategy
+from trading_lab.strategies.base import Strategy, StrategyMetadata
 
 
 class MovingAverageCrossoverStrategy(Strategy):
-    """BUY when fast SMA crosses above slow SMA. SELL on cross below."""
-
     name = "ma_crossover"
+    metadata = StrategyMetadata(
+        name="ma_crossover",
+        category="trend",
+        hypothesis="When a short-term moving average crosses above a long-term one, a new uptrend is confirmed. Cross below signals a downtrend.",
+        expected_market_regime="bull_trending",
+        failure_modes=[
+            "Whipsaws in ranging markets: crossovers produce false signals that reverse immediately",
+            "Lagging indicator: signals arrive late, missing the bulk of the move",
+            "Slow SMAs smooth out noise but also delay signal response to sudden reversals",
+        ],
+        parameters={
+            "fast": (10, "Fast SMA period"),
+            "slow": (30, "Slow SMA period (must be > fast)"),
+        },
+        required_data="close",
+    )
 
     def __init__(self, fast: int = 10, slow: int = 30):
         if fast >= slow:

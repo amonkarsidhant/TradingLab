@@ -1,9 +1,25 @@
 from trading_lab.models import Signal, SignalAction
-from trading_lab.strategies.base import Strategy
+from trading_lab.strategies.base import Strategy, StrategyMetadata
 
 
 class SimpleMomentumStrategy(Strategy):
     name = "simple_momentum"
+    metadata = StrategyMetadata(
+        name="simple_momentum",
+        category="momentum",
+        hypothesis="Assets that have moved up recently tend to continue moving up (and vice versa for moves down).",
+        expected_market_regime="bull_trending",
+        failure_modes=[
+            "Fails in ranging/choppy markets where prices oscillate without direction",
+            "Whipsaw losses when trend reverses abruptly after entry signal",
+            "Confidence scales with move size, creating larger entries near local tops",
+        ],
+        parameters={
+            "lookback": (5, "Number of periods to measure price change"),
+            "threshold_pct": (1.0, "Minimum % change to trigger a signal"),
+        },
+        required_data="close",
+    )
 
     def __init__(self, lookback: int = 5, threshold_pct: float = 1.0):
         self.lookback = lookback

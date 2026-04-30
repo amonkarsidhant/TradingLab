@@ -1,17 +1,26 @@
 from trading_lab.models import Signal, SignalAction
-from trading_lab.strategies.base import Strategy
+from trading_lab.strategies.base import Strategy, StrategyMetadata
 
 
 class VolumePriceStrategy(Strategy):
-    """BUY on volume-confirmed breakouts. SELL on volume-confirmed breakdowns.
-
-    Uses a simple volume spike + price momentum combo:
-    - Price must move > threshold%
-    - Volume must be > 1.5x the average volume over the lookback
-    - This filters out weak breakouts and confirms conviction
-    """
-
     name = "volume_price"
+    metadata = StrategyMetadata(
+        name="volume_price",
+        category="breakout",
+        hypothesis="Price breakouts accompanied by above-average volume have higher conviction and are more likely to sustain.",
+        expected_market_regime="bull_trending",
+        failure_modes=[
+            "Volume data is simulated from price volatility when real volume unavailable",
+            "Fails in low-volatility periods where no volume spikes occur",
+            "Can produce false breakouts in high-volatility environments with noise",
+        ],
+        parameters={
+            "lookback": (10, "Lookback period for price change and volume average"),
+            "threshold_pct": (2.0, "Minimum % price move to trigger breakout check"),
+            "volume_multiplier": (1.5, "Min ratio of current volume to average volume"),
+        },
+        required_data="close",
+    )
 
     def __init__(self, lookback: int = 10, threshold_pct: float = 2.0, volume_multiplier: float = 1.5):
         self.lookback = lookback

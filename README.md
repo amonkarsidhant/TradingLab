@@ -459,6 +459,36 @@ The report covers:
 | `--capital` | 10000 | Initial capital for backtests |
 | `--output` | stdout | Write markdown report to file path |
 
+## Strategy Factsheet
+
+Generate a comprehensive research-grade evaluation of any strategy with benchmark comparison, cost sensitivity, and parameter stability analysis.
+
+```bash
+# Generate a factsheet for simple_momentum on AAPL
+python -m trading_lab.cli strategy-factsheet --strategy simple_momentum --ticker AAPL_US_EQ
+
+# Write to file
+python -m trading_lab.cli strategy-factsheet --strategy ma_crossover --ticker AAPL_US_EQ --output docs/factsheets/ma-crossover-apl.md
+```
+
+The factsheet includes:
+
+- **Strategy metadata** — category, hypothesis, expected market regime, failure modes, parameters
+- **Backtest metrics** — total return, CAGR, Sharpe, max drawdown, win rate, profit factor
+- **Benchmark comparison** — strategy return vs buy-and-hold
+- **Cost sensitivity** — 4 scenarios from ideal (0/0) to high (1%/0.5%)
+- **Parameter stability** — sweep over parameter grid with mean/std/CV and best combo
+- **Verdict** — research / watch / reject based on Sharpe, drawdown, trade count, stability
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `--strategy` | simple_momentum | Strategy to evaluate |
+| `--ticker` | AAPL_US_EQ | Ticker symbol |
+| `--capital` | 10000 | Initial capital for backtests |
+| `--output` | stdout | Write markdown report to file path |
+
 ## Dashboard
 
 ```bash

@@ -13,13 +13,27 @@ When sentiment data is available, it will:
   - SELL when greed is extreme (extreme greed = top)
 """
 from trading_lab.models import Signal, SignalAction
-from trading_lab.strategies.base import Strategy
+from trading_lab.strategies.base import Strategy, StrategyMetadata
 
 
 class SentimentStrategy(Strategy):
-    """BUY on extreme fear, SELL on extreme greed."""
-
     name = "sentiment"
+    metadata = StrategyMetadata(
+        name="sentiment",
+        category="sentiment",
+        hypothesis="Extreme market fear creates buying opportunities; extreme greed signals a top.",
+        expected_market_regime="any",
+        failure_modes=[
+            "Stub implementation — always returns HOLD until Fear & Greed Index is wired up",
+            "Sentiment can remain extreme for extended periods, leading to premature counter-trend entries",
+            "Requires external API integration for actionable signals",
+        ],
+        parameters={
+            "fear_threshold": (20, "Fear & Greed Index value below which is extreme fear"),
+            "greed_threshold": (80, "Fear & Greed Index value above which is extreme greed"),
+        },
+        required_data="sentiment",
+    )
 
     def __init__(self, fear_threshold: int = 20, greed_threshold: int = 80):
         self.fear_threshold = fear_threshold
