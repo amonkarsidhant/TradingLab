@@ -19,6 +19,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from trading_lab.agentic.reflection import MungerReflectionEngine
 from trading_lab.backtest.engine import BacktestEngine
 from trading_lab.backtest.sweep import SweepEngine
 from trading_lab.brokers.trading212 import Trading212Client
@@ -172,6 +173,11 @@ TOOLS = [
                 "limit": {"type": "integer", "description": "Number of signals to return", "default": 10},
             },
         },
+    ),
+    Tool(
+        name="run_reflection",
+        description="Run the Munger Reflection Engine — grade your portfolio, critique positions, detect regime.",
+        inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
         name="get_daily_journal",
@@ -499,6 +505,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         except sqlite3.OperationalError:
             data = []
         return [TextContent(type="text", text=json.dumps(data, indent=2, default=str))]
+
+    # ── Reflection ────────────────────────────────────────────────────────────
+    if name == "run_reflection":
+        engine = MungerReflectionEngine(settings)
+        report = engine.reflect()
+        text = engine.format_reflection(report)
+        return [TextContent(type="text", text=text)]
 
     # ── Daily Journal ─────────────────────────────────────────────────────────
     if name == "get_daily_journal":

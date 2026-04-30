@@ -230,18 +230,15 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             await update.message.reply_html("<b>Cannot buy:</b> position limit or cash reserve reached.")
             return ConversationHandler.END
 
-        # Get current price via T212
+        # Get current price via T212 positions, then yfinance fallback for new tickers.
         client = Trading212Client(settings)
-        summary = client.account_summary()
-        positions_raw = client.positions()
-        current_price = None
-        for p in positions_raw:
-            if p.get("instrument", {}).get("ticker") == ticker:
-                current_price = p.get("currentPrice", 0)
-                break
+        current_price = client._get_current_price(ticker)
 
         if not current_price:
-            await update.message.reply_html(f"Cannot find current price for <code>{_esc(ticker)}</code>.")
+            await update.message.reply_html(
+                f"Cannot find current price for <code>{_esc(ticker)}</code> "
+                f"(not held and no yfinance quote)."
+            )
             return ConversationHandler.END
 
         cost = quantity * current_price

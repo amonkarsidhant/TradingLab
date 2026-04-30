@@ -6,13 +6,14 @@ import typer
 from rich import print
 
 from trading_lab.agents.pipeline import ReviewPipeline, render_review_report
+from trading_lab.agentic.reflection import MungerReflectionEngine
 from trading_lab.agents.runner import AgentRunner, detect_provider
 from trading_lab.backtest.engine import BacktestEngine
 from trading_lab.backtest.report import render_report
 from trading_lab.backtest.sweep import SweepEngine
 from trading_lab.backtest.sweep_report import render_sweep_report
 from trading_lab.config import get_settings
-from trading_lab.brokers.trading212 import Trading212Client
+from trading_lab.brokers.trading212 import OrderType, Trading212Client
 from trading_lab.data.market_data import make_provider
 from trading_lab.engine import ExecutionEngine
 from trading_lab.logger import SnapshotLogger
@@ -24,6 +25,7 @@ from trading_lab.risk import RiskPolicy
 from trading_lab.shadow.account import ShadowAccount
 from trading_lab.shadow.report import render_shadow_report
 from trading_lab.strategies import get_strategy, list_strategies
+from trading_lab import universes as universes_mod
 
 app = typer.Typer(help="Sid Trading Lab CLI")
 
@@ -120,6 +122,11 @@ def run_strategy(
         70,
         help="RSI overbought threshold (mean_reversion only).",
     ),
+    auto_stop: bool = typer.Option(
+        False,
+        "--auto-stop",
+        help="Auto-place a trailing stop on live BUY entries. Ignored under dry-run.",
+    ),
 ):
     kwargs = _build_strategy_kwargs(
         strategy, lookback=lookback, fast=fast, slow=slow,
@@ -140,6 +147,7 @@ def run_strategy(
         broker=get_client(),
         risk_policy=RiskPolicy(),
         logger=get_logger(),
+        auto_stop=auto_stop,
     )
     result = engine.handle_signal(signal, dry_run=dry_run)
     print_json(result)
@@ -229,6 +237,28 @@ def pending_orders():
     print_json(data)
 
 
+@app.command("reflect")
+def reflect(
+    output: str = typer.Option("", help="Write reflection to file. Defaults to stdout."),
+):
+    """Run the Munger Reflection Engine — constant portfolio introspection."""
+    engine = MungerReflectionEngine(get_settings())
+    try:
+        report = engine.reflect()
+        formatted = engine.format_reflection(report)
+        if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(formatted, encoding="utf-8")
+            print(f"[green]Reflection written to {output_path}[/green]")
+        else:
+            typer.echo(formatted)
+    except Exception as exc:
+        print(f"[red]Reflection failed:[/red] {exc}")
+        import traceback
+        traceback.print_exc()
+
+
 @app.command("history-orders")
 def history_orders(
     ticker: str = typer.Option("", help="Filter by ticker."),
@@ -238,6 +268,288 @@ def history_orders(
     client = get_client()
     items = client.history_orders(ticker=ticker, limit=limit)
     print_json(items)
+
+
+@app.command("market-order")
+def market_order(
+    ticker: str = typer.Option(..., help="Ticker symbol, e.g. AAPL_US_EQ"),
+    quantity: float = typer.Option(..., help="Positive to buy, negative to sell."),
+    extended_hours: bool = typer.Option(False, "--extended-hours"),
+    dry_run: bool = typer.Option(True),
+    save_snapshot: bool = typer.Option(False, "--save-snapshot"),
+):
+    """Place a market order. Defaults to dry-run."""
+    client = get_client()
+    result = client.market_order(
+        ticker=ticker, quantity=quantity,
+        dry_run=dry_run, extended_hours=extended_hours,
+    )
+    if save_snapshot:
+        get_logger().save_snapshot("market_order", result)
+        print("[green]Snapshot saved.[/green]")
+    print_json(result)
+
+
+@app.command("place-stop-limit-order")
+def place_stop_limit_order(
+    ticker: str = typer.Option(..., help="Ticker symbol, e.g. AAPL_US_EQ"),
+    quantity: float = typer.Option(..., help="Positive to buy, negative to sell."),
+    stop_price: float = typer.Option(..., help="Stop trigger price."),
+    limit_price: float = typer.Option(..., help="Limit price once stop triggers."),
+    dry_run: bool = typer.Option(True),
+    time_validity: str = typer.Option("DAY"),
+    save_snapshot: bool = typer.Option(False, "--save-snapshot"),
+):
+    """Place a stop-limit order on the Trading 212 demo environment."""
+    client = get_client()
+    result = client.stop_limit_order(
+        ticker=ticker, quantity=quantity,
+        stop_price=stop_price, limit_price=limit_price,
+        dry_run=dry_run, time_validity=time_validity,
+    )
+    if save_snapshot:
+        get_logger().save_snapshot("stop_limit_order", result)
+    print_json(result)
+
+
+@app.command("get-order")
+def get_order(order_id: int = typer.Argument(..., help="Order ID to fetch.")):
+    """Get details of a single order by ID."""
+    print_json(get_client().get_order(order_id))
+
+
+@app.command("replace-order")
+def replace_order(
+    order_id: int = typer.Argument(..., help="Existing order ID to cancel."),
+    order_type: str = typer.Option(..., help="MARKET, LIMIT, STOP, or STOP_LIMIT"),
+    ticker: str = typer.Option(...),
+    quantity: float = typer.Option(...),
+    limit_price: float = typer.Option(0.0, help="Required for LIMIT / STOP_LIMIT."),
+    stop_price: float = typer.Option(0.0, help="Required for STOP / STOP_LIMIT."),
+    time_validity: str = typer.Option("DAY"),
+    dry_run: bool = typer.Option(True),
+):
+    """Cancel an existing order and replace it with new params."""
+    client = get_client()
+    result = client.replace_order(
+        order_id=order_id,
+        order_type=OrderType(order_type.upper()),
+        ticker=ticker,
+        quantity=quantity,
+        limit_price=limit_price or None,
+        stop_price=stop_price or None,
+        time_validity=time_validity,
+        dry_run=dry_run,
+    )
+    print_json(result)
+
+
+@app.command("bracket-order")
+def bracket_order(
+    ticker: str = typer.Option(...),
+    quantity: float = typer.Option(..., help="Positive entry quantity (long-only)."),
+    stop_price: float = typer.Option(..., help="Protective stop-loss price."),
+    take_profit_price: float = typer.Option(..., help="Take-profit limit price."),
+    dry_run: bool = typer.Option(True),
+):
+    """Market entry + protective stop + take-profit limit (best-effort)."""
+    client = get_client()
+    result = client.bracket_order(
+        ticker=ticker, quantity=quantity,
+        stop_price=stop_price, take_profit_price=take_profit_price,
+        dry_run=dry_run,
+    )
+    print_json(result)
+
+
+@app.command("history-dividends")
+def history_dividends(
+    ticker: str = typer.Option(""),
+    limit: int = typer.Option(50),
+):
+    """Fetch dividend history."""
+    print_json(get_client().history_dividends(ticker=ticker, limit=limit))
+
+
+@app.command("history-transactions")
+def history_transactions(limit: int = typer.Option(50)):
+    """Fetch account transaction history (deposits, withdrawals, fees)."""
+    print_json(get_client().history_transactions(limit=limit))
+
+
+@app.command("exchanges")
+def exchanges():
+    """List exchanges and their trading schedules."""
+    print_json(get_client().exchanges())
+
+
+@app.command("request-export")
+def request_export(
+    time_from: str = typer.Option(..., help="ISO 8601, e.g. 2025-01-01T00:00:00Z"),
+    time_to: str = typer.Option(..., help="ISO 8601, e.g. 2025-12-31T23:59:59Z"),
+    include_dividends: bool = typer.Option(True),
+    include_interest: bool = typer.Option(True),
+    include_orders: bool = typer.Option(True),
+    include_transactions: bool = typer.Option(True),
+):
+    """Request a CSV export job. Use list-exports to poll status."""
+    client = get_client()
+    result = client.request_export(
+        time_from=time_from, time_to=time_to,
+        include_dividends=include_dividends, include_interest=include_interest,
+        include_orders=include_orders, include_transactions=include_transactions,
+    )
+    print_json(result)
+
+
+@app.command("list-exports")
+def list_exports():
+    """List CSV exports with status / download links."""
+    print_json(get_client().list_exports())
+
+
+# ── Discovery: instruments + universes ────────────────────────────────────────
+
+@app.command("instruments-stats")
+def instruments_stats():
+    """Show counts of the cached T212 instrument universe (by type/currency/exchange/country)."""
+    client = get_client()
+    cache = client._instrument_cache
+    cache.load_from_db()
+    if cache.count == 0:
+        print("[yellow]Cache empty — run `fetch-instruments` first.[/yellow]")
+        return
+    stats = cache.stats()
+    print(f"[bold]Total cached: {stats['total']['all']}[/bold]\n")
+    for group_name, group in stats.items():
+        if group_name == "total":
+            continue
+        top = sorted(group.items(), key=lambda kv: -kv[1])[:15]
+        print(f"[bold]{group_name}[/bold]")
+        for k, v in top:
+            print(f"  {k:<12} {v}")
+        print()
+
+
+@app.command("instruments-search")
+def instruments_search(
+    type: str = typer.Option("", help="STOCK, ETF, or WARRANT"),
+    currency: str = typer.Option("", help="USD, EUR, GBP, ..."),
+    exchange: str = typer.Option("", help="Exchange code, parsed from ticker (US, UK, DE, ...)."),
+    country: str = typer.Option("", help="ISIN issuer country (US, CA, GB, ...)."),
+    search: str = typer.Option("", help="Substring match on ticker/name/shortName."),
+    limit: int = typer.Option(50),
+):
+    """Filter the cached instrument universe. AND across non-empty options."""
+    client = get_client()
+    cache = client._instrument_cache
+    cache.load_from_db()
+    if cache.count == 0:
+        print("[yellow]Cache empty — run `fetch-instruments` first.[/yellow]")
+        return
+    results = cache.filter(
+        type=type, currency=currency, exchange=exchange,
+        country=country, search=search, limit=limit,
+    )
+    if not results:
+        print("[red]No instruments match the filter.[/red]")
+        return
+    print(f"[dim]Showing {len(results)} of total cache size {cache.count}[/dim]\n")
+    for inst in results:
+        print(
+            f"  [bold]{inst.get('ticker'):<22}[/bold] "
+            f"{inst.get('type', '?'):<7} "
+            f"{inst.get('currencyCode', '?'):<4} "
+            f"{inst.get('name', '')}"
+        )
+
+
+@app.command("universe-list")
+def universe_list():
+    """List all curated diversification universes."""
+    for name, items in universes_mod.all_universes().items():
+        size = sum(len(v) for v in items.values()) if isinstance(next(iter(items.values()), None), list) else len(items)
+        print(f"  [bold]{name}[/bold]  ({size} tickers)")
+
+
+@app.command("universe-show")
+def universe_show(name: str = typer.Argument(..., help="sectors, indexes, geographic, bonds, commodities, sp500_sectors")):
+    """Print all tickers in one universe."""
+    universes = universes_mod.all_universes()
+    if name not in universes:
+        print(f"[red]Unknown universe '{name}'. Try one of: {list(universes.keys())}[/red]")
+        raise typer.Exit(1)
+    universe = universes[name]
+    if isinstance(next(iter(universe.values()), None), list):
+        # sp500_sectors: dict[sector, list[ticker]]
+        for sector, tickers in universe.items():
+            print(f"\n[bold]{sector}[/bold]")
+            for t in tickers:
+                print(f"  {t}")
+    else:
+        for label, ticker in universe.items():
+            print(f"  [bold]{ticker:<14}[/bold] {label}")
+
+
+@app.command("universe-diversify")
+def universe_diversify(
+    categories: str = typer.Option(
+        "indexes,geographic,bonds,commodities",
+        help="Comma-separated category list. Add 'sectors' for a random sector ETF.",
+    ),
+    seed: int = typer.Option(0, help="Random seed (0 = nondeterministic)."),
+):
+    """Suggest a diversified ETF basket — one ticker per category."""
+    cats = [c.strip() for c in categories.split(",") if c.strip()]
+    basket = universes_mod.diversify(categories=cats, seed=seed or None)
+    print(f"[bold]Diversified basket ({len(basket.tickers)} tickers)[/bold]\n")
+    for label, ticker in basket.sources.items():
+        print(f"  [bold]{ticker:<14}[/bold] {label}")
+
+
+@app.command("sector-sample")
+def sector_sample(
+    sector: str = typer.Argument(..., help="GICS sector name, e.g. 'Technology'."),
+    count: int = typer.Option(3),
+    seed: int = typer.Option(0),
+):
+    """Pick `count` random S&P 500 tickers from one GICS sector."""
+    try:
+        tickers = universes_mod.sector_sample(sector, count=count, seed=seed or None)
+    except KeyError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    print(f"[bold]{sector} — {len(tickers)} picks[/bold]")
+    for t in tickers:
+        print(f"  {t}")
+
+
+@app.command("instrument-info")
+def instrument_info(ticker: str = typer.Argument(..., help="T212 ticker, e.g. AAPL_US_EQ")):
+    """Fetch sector/industry/market-cap/PE for one ticker via yfinance.
+
+    Slow (~1s per call) and rate-limited by Yahoo. Use sparingly.
+    """
+    from trading_lab.brokers.trading212 import _t212_ticker_to_yf
+    try:
+        import yfinance as yf
+    except ImportError:
+        print("[red]yfinance not installed.[/red]")
+        raise typer.Exit(1)
+    yf_symbol = _t212_ticker_to_yf(ticker)
+    info = yf.Ticker(yf_symbol).info or {}
+    keys = [
+        "shortName", "longName", "sector", "industry", "country",
+        "marketCap", "trailingPE", "forwardPE", "dividendYield",
+        "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "averageVolume", "currency",
+    ]
+    extracted = {k: info.get(k) for k in keys if info.get(k) is not None}
+    if not extracted:
+        print(f"[yellow]No yfinance data for {yf_symbol} (T212: {ticker}).[/yellow]")
+        return
+    print(f"[bold]{ticker}[/bold]  (yfinance: {yf_symbol})\n")
+    for k, v in extracted.items():
+        print(f"  {k:<20} {v}")
 
 
 @app.command("list-strategies")
@@ -266,6 +578,14 @@ def backtest(
     oversold: int = typer.Option(30, help="RSI oversold (mean_reversion only)."),
     overbought: int = typer.Option(70, help="RSI overbought (mean_reversion only)."),
     capital: float = typer.Option(10_000.0, help="Initial capital for the backtest."),
+    commission: float = typer.Option(
+        0.0, "--commission",
+        help="Commission as a fraction (0.001 = 10 bps). Applied to entry and exit notional.",
+    ),
+    slippage: float = typer.Option(
+        0.0, "--slippage",
+        help="Slippage as a fraction (0.001 = 10 bps). Worsens fill price on both sides.",
+    ),
     output: str = typer.Option("", help="Write markdown report to file. Defaults to stdout."),
 ):
     """Run a walk-forward backtest and print a markdown report."""
@@ -284,7 +604,10 @@ def backtest(
     # Fetch a generous amount of history for the backtest.
     prices = provider.get_prices(ticker=ticker, lookback=252)
 
-    engine = BacktestEngine(strat, initial_capital=capital)
+    engine = BacktestEngine(
+        strat, initial_capital=capital,
+        commission_pct=commission, slippage_pct=slippage,
+    )
     result = engine.run(prices=prices, ticker=ticker)
 
     report = render_report(result)

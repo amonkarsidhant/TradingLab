@@ -52,6 +52,7 @@ Every routine MUST:
 | trade, position, order, buy, sell, P&L | `skills/trading.md` |
 | routine, journal, report, daily, weekly | `skills/routines.md` |
 | memory, recall, history, past trade | `skills/memory.md` |
+| reflect, munger, critique, introspection, grade | `skills/reflection.md` |
 
 ## Available Slash Commands
 

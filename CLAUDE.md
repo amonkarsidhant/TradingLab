@@ -33,6 +33,18 @@ This is a learning experiment — no real money is at risk.
 | 16:00 | Market close | EOD summary, journal trades |
 | Fri 16:00 | Weekly review | Full portfolio analysis, strategy adjustments |
 
+## Skill Activation Table
+
+| Keyword / Task | Load Skill |
+|---|---|
+| strategy, momentum, entry, exit, signal, trend | `skills/momentum-trading.md` |
+| risk, stop, loss, sizing, safety, guardrail | `skills/risk-management.md` |
+| portfolio, rebalance, allocation, diversity | `skills/portfolio-rebalance.md` |
+| trade, position, order, buy, sell, P&L | `skills/trading.md` |
+| routine, journal, report, daily, weekly | `skills/routines.md` |
+| memory, recall, history, past trade | `skills/memory.md` |
+| reflect, munger, critique, introspection, grade | `skills/reflection.md` |
+
 ## Memory Architecture
 
 Every routine MUST:

@@ -30,6 +30,7 @@ class Position:
     fx_impact: float = 0.0
     account_currency: str = ""
     instrument_currency: str = ""
+    created_at: str = ""  # ISO 8601 from T212; "" if unknown
 
 
 @dataclass
@@ -118,6 +119,7 @@ class PortfolioManager:
                 fx_impact=wp.get("fxImpact", 0),
                 account_currency=wp.get("currency", account_currency),
                 instrument_currency=inst.get("currency", ""),
+                created_at=p.get("initialFillDate", "") or p.get("createdAt", ""),
             ))
         self._save_peaks(peaks)
 

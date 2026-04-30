@@ -1,5 +1,7 @@
 import base64
+import hashlib
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -9,6 +11,23 @@ from typing import Any
 import requests
 
 from trading_lab.config import Settings
+
+logger = logging.getLogger(__name__)
+
+
+def _t212_ticker_to_yf(ticker: str) -> str:
+    """Convert T212 ticker (AAPL_US_EQ) to a yfinance symbol (AAPL).
+
+    T212 format: {SYMBOL}_{EXCHANGE}_{TYPE}. yfinance uses the bare symbol for
+    US tickers; LSE tickers need a `.L` suffix, but those are rare in this lab.
+    """
+    if "_" not in ticker:
+        return ticker
+    parts = ticker.split("_")
+    symbol = parts[0]
+    if len(parts) >= 2 and parts[1] == "UK":
+        return f"{symbol}.L"
+    return symbol
 
 
 class RateLimit:
@@ -162,6 +181,86 @@ class InstrumentCache:
             self.load_from_db()
         return len(self._memory)
 
+    @staticmethod
+    def _exchange_from_ticker(ticker: str) -> str:
+        """T212 ticker layout: SYMBOL_EXCHANGE_TYPE → returns EXCHANGE."""
+        parts = ticker.split("_")
+        return parts[1] if len(parts) >= 2 else ""
+
+    @staticmethod
+    def _country_from_isin(isin: str) -> str:
+        """ISIN first two chars are ISO country of the issuer."""
+        return isin[:2].upper() if isin and len(isin) >= 2 else ""
+
+    def filter(
+        self,
+        type: str = "",
+        currency: str = "",
+        exchange: str = "",
+        country: str = "",
+        search: str = "",
+        limit: int = 0,
+    ) -> list[dict]:
+        """Filter cached instruments by any combination of attributes.
+
+        All filters are case-insensitive and ANDed together. Empty filter
+        means 'no constraint'.
+        """
+        if not self._loaded:
+            self.load_from_db()
+        type_l = type.upper()
+        currency_l = currency.upper()
+        exchange_l = exchange.upper()
+        country_l = country.upper()
+        search_l = search.lower()
+
+        results: list[dict] = []
+        for inst in self._memory.values():
+            if type_l and inst.get("type", "").upper() != type_l:
+                continue
+            if currency_l and inst.get("currencyCode", "").upper() != currency_l:
+                continue
+            if exchange_l and self._exchange_from_ticker(inst.get("ticker", "")).upper() != exchange_l:
+                continue
+            if country_l and self._country_from_isin(inst.get("isin", "")) != country_l:
+                continue
+            if search_l:
+                hay = " ".join([
+                    inst.get("ticker", ""),
+                    inst.get("name", ""),
+                    inst.get("shortName", ""),
+                ]).lower()
+                if search_l not in hay:
+                    continue
+            results.append(inst)
+            if limit and len(results) >= limit:
+                break
+        return results
+
+    def stats(self) -> dict[str, dict[str, int]]:
+        """Aggregate counts of the cached universe."""
+        if not self._loaded:
+            self.load_from_db()
+        by_type: dict[str, int] = {}
+        by_currency: dict[str, int] = {}
+        by_exchange: dict[str, int] = {}
+        by_country: dict[str, int] = {}
+        for inst in self._memory.values():
+            by_type[inst.get("type", "?")] = by_type.get(inst.get("type", "?"), 0) + 1
+            cur = inst.get("currencyCode", "?") or "?"
+            by_currency[cur] = by_currency.get(cur, 0) + 1
+            exch = self._exchange_from_ticker(inst.get("ticker", "")) or "?"
+            by_exchange[exch] = by_exchange.get(exch, 0) + 1
+            ctry = self._country_from_isin(inst.get("isin", "")) or "?"
+            by_country[ctry] = by_country.get(ctry, 0) + 1
+        return {
+            "total": {"all": len(self._memory)},
+            "by_type": by_type,
+            "by_currency": by_currency,
+            "by_exchange": by_exchange,
+            "by_country": by_country,
+        }
+
 
 class Trading212Client:
     """Trading 212 REST client with per-endpoint rate limiting, retry, and caching."""
@@ -187,6 +286,13 @@ class Trading212Client:
 
     MAX_RETRIES = 3
     RETRY_BACKOFF_BASE = 1.5
+    IDEMPOTENCY_TTL_SECONDS = 60.0
+    _IDEMPOTENT_PATHS = (
+        "/equity/orders/market",
+        "/equity/orders/limit",
+        "/equity/orders/stop",
+        "/equity/orders/stop_limit",
+    )
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -194,6 +300,33 @@ class Trading212Client:
         self._instrument_cache = InstrumentCache(
             db_path=settings.db_path.replace(".sqlite3", "_cache.sqlite3")
         )
+        self._idempotency_cache: dict[str, tuple[float, Any]] = {}
+        self._idempotency_lock = threading.Lock()
+
+    def _idempotency_key(self, method: str, path: str, json_body: Any) -> str:
+        body = json.dumps(json_body, sort_keys=True, default=str) if json_body else ""
+        h = hashlib.sha256(f"{method}|{path}|{body}".encode("utf-8")).hexdigest()
+        return h
+
+    def _idempotency_get(self, key: str) -> Any | None:
+        with self._idempotency_lock:
+            entry = self._idempotency_cache.get(key)
+            if not entry:
+                return None
+            ts, value = entry
+            if time.time() - ts > self.IDEMPOTENCY_TTL_SECONDS:
+                del self._idempotency_cache[key]
+                return None
+            return value
+
+    def _idempotency_put(self, key: str, value: Any) -> None:
+        now = time.time()
+        with self._idempotency_lock:
+            self._idempotency_cache[key] = (now, value)
+            stale = [k for k, (ts, _) in self._idempotency_cache.items()
+                     if now - ts > self.IDEMPOTENCY_TTL_SECONDS]
+            for k in stale:
+                del self._idempotency_cache[k]
 
     def _resolve_limit(self, endpoint: str) -> RateLimit:
         for key, limit in self.ENDPOINT_LIMITS.items():
@@ -230,6 +363,18 @@ class Trading212Client:
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         endpoint_key = path.split("?")[0].strip("/")
         rate_limit = self._resolve_limit(endpoint_key)
+
+        idem_key: str | None = None
+        if method.upper() == "POST" and any(p in path for p in self._IDEMPOTENT_PATHS):
+            idem_key = self._idempotency_key(method, path, kwargs.get("json"))
+            cached = self._idempotency_get(idem_key)
+            if cached is not None:
+                logger.warning(
+                    "Idempotency dedupe hit for %s %s — returning cached response",
+                    method, path,
+                )
+                return cached
+
         rate_limit.wait_if_needed()
 
         url = f"{self.base_url}{path}"
@@ -245,9 +390,10 @@ class Trading212Client:
             )
 
             if response.ok:
-                if response.text.strip():
-                    return response.json()
-                return None
+                result = response.json() if response.text.strip() else None
+                if idem_key is not None:
+                    self._idempotency_put(idem_key, result)
+                return result
 
             if response.status_code == 429:
                 retry_after = response.headers.get("Retry-After")
@@ -293,11 +439,13 @@ class Trading212Client:
         try:
             summary = self.account_summary()
             available = summary.get("cash", {}).get("availableToTrade", 0)
-            inst = self._instrument_cache.get(ticker)
-            est_price = 0
-            if inst:
-                est_price = self._get_current_price(ticker)
-            est_cost = quantity * est_price if est_price > 0 else 999_999
+            est_price = self._get_current_price(ticker)
+            if est_price <= 0:
+                return False, (
+                    f"Cannot estimate cost for {ticker}: no price available "
+                    f"(not in positions, no yfinance quote). Funds check skipped."
+                )
+            est_cost = quantity * est_price
             if est_cost > available:
                 return False, (
                     f"Insufficient funds: need ~{est_cost:.2f}, "
@@ -305,7 +453,7 @@ class Trading212Client:
                 )
         except Exception as e:
             return False, f"Fund check failed: {e}"
-        return True, "Funds OK."
+        return True, f"Funds OK (est cost {quantity * est_price:.2f})."
 
     def _validate_sell(self, ticker: str, quantity: float) -> tuple[bool, str]:
         if quantity <= 0:
@@ -327,14 +475,30 @@ class Trading212Client:
         return True, ""
 
     def _get_current_price(self, ticker: str) -> float:
+        """Best-effort current price.
+
+        Order of precedence:
+          1. T212 positions() — exact, but only for held tickers.
+          2. yfinance — last close for non-held tickers (~15min delayed).
+        Returns 0 if nothing works.
+        """
         try:
-            positions = self.positions()
-            for p in positions:
+            for p in self.positions():
                 if p.get("instrument", {}).get("ticker") == ticker:
-                    return p.get("currentPrice", 0)
+                    return float(p.get("currentPrice", 0) or 0)
         except Exception:
             pass
-        return 0
+
+        try:
+            import yfinance as yf
+            yf_symbol = _t212_ticker_to_yf(ticker)
+            tk = yf.Ticker(yf_symbol)
+            hist = tk.history(period="5d", auto_adjust=True)
+            if not hist.empty:
+                return float(hist["Close"].iloc[-1])
+        except Exception as exc:
+            logger.debug("yfinance price fallback failed for %s: %s", ticker, exc)
+        return 0.0
 
     # ── Account ───────────────────────────────────────────────────────────
 
@@ -343,8 +507,11 @@ class Trading212Client:
 
     # ── Positions ──────────────────────────────────────────────────────────
 
-    def positions(self) -> Any:
-        return self._request("GET", "/equity/positions")
+    def positions(self, ticker: str = "") -> Any:
+        path = "/equity/positions"
+        if ticker:
+            path += f"?ticker={ticker}"
+        return self._request("GET", path)
 
     # ── Instruments with caching ───────────────────────────────────────────
 
@@ -509,3 +676,148 @@ class Trading212Client:
 
     def history_transactions(self, limit: int = 50) -> list[dict]:
         return self._paginate("GET", f"/equity/history/transactions?limit={limit}")
+
+    # ── CSV exports ────────────────────────────────────────────────────────
+
+    def request_export(
+        self,
+        time_from: str,
+        time_to: str,
+        include_dividends: bool = True,
+        include_interest: bool = True,
+        include_orders: bool = True,
+        include_transactions: bool = True,
+    ) -> dict[str, Any]:
+        """Request a CSV report. time_from / time_to are ISO 8601 strings."""
+        payload = {
+            "dataIncluded": {
+                "includeDividends": include_dividends,
+                "includeInterest": include_interest,
+                "includeOrders": include_orders,
+                "includeTransactions": include_transactions,
+            },
+            "timeFrom": time_from,
+            "timeTo": time_to,
+        }
+        return self._request("POST", "/equity/history/exports", json=payload)
+
+    def list_exports(self) -> Any:
+        """Check status / download links for previously requested exports."""
+        return self._request("GET", "/equity/history/exports")
+
+    # ── Composite order helpers ────────────────────────────────────────────
+
+    def replace_order(
+        self,
+        order_id: int,
+        order_type: OrderType,
+        ticker: str,
+        quantity: float,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        time_validity: str = "DAY",
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        """Cancel an existing order and place a replacement.
+
+        T212 has no native edit endpoint — this is cancel + re-place. If the
+        cancel succeeds but the re-place fails, the position is left flat
+        and the failure is surfaced to the caller (no auto-retry).
+        """
+        if dry_run:
+            return {
+                "dry_run": True,
+                "message": f"Would cancel order {order_id} and place replacement.",
+                "order_id": order_id,
+                "new_payload": {
+                    "type": order_type.value, "ticker": ticker, "quantity": quantity,
+                    "limitPrice": limit_price, "stopPrice": stop_price,
+                    "timeValidity": time_validity,
+                },
+            }
+
+        cancel_result = self.cancel_order(order_id)
+
+        try:
+            if order_type == OrderType.LIMIT:
+                if limit_price is None:
+                    raise ValueError("limit_price required for LIMIT replacement.")
+                new_order = self.limit_order(
+                    ticker, quantity, limit_price,
+                    dry_run=False, time_validity=time_validity,
+                )
+            elif order_type == OrderType.STOP:
+                if stop_price is None:
+                    raise ValueError("stop_price required for STOP replacement.")
+                new_order = self.stop_order(
+                    ticker, quantity, stop_price,
+                    dry_run=False, time_validity=time_validity,
+                )
+            elif order_type == OrderType.STOP_LIMIT:
+                if stop_price is None or limit_price is None:
+                    raise ValueError("stop_price and limit_price required for STOP_LIMIT.")
+                new_order = self.stop_limit_order(
+                    ticker, quantity, stop_price, limit_price,
+                    dry_run=False, time_validity=time_validity,
+                )
+            elif order_type == OrderType.MARKET:
+                new_order = self.market_order(ticker, quantity, dry_run=False)
+            else:
+                raise ValueError(f"Unsupported order_type: {order_type}")
+        except Exception as exc:
+            return {
+                "cancelled": cancel_result,
+                "replacement_error": str(exc),
+                "warning": "Original order cancelled; replacement FAILED. Position is unprotected.",
+            }
+
+        return {"cancelled": cancel_result, "replacement": new_order}
+
+    def bracket_order(
+        self,
+        ticker: str,
+        quantity: float,
+        stop_price: float,
+        take_profit_price: float,
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        """Market entry + protective stop + take-profit limit.
+
+        Best-effort: places legs sequentially. If a protective leg fails after
+        the entry fills, returns a warning rather than rolling back the entry
+        (T212 has no atomic bracket endpoint and partial fills can't be undone).
+        Caller should monitor 'warnings' and decide whether to manually cover.
+        """
+        if quantity <= 0:
+            raise ValueError("bracket_order requires a positive entry quantity (long-only).")
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "entry": {"type": "MARKET", "ticker": ticker, "quantity": quantity},
+                "stop_loss": {"type": "STOP", "ticker": ticker, "quantity": -quantity, "stopPrice": stop_price},
+                "take_profit": {"type": "LIMIT", "ticker": ticker, "quantity": -quantity, "limitPrice": take_profit_price},
+            }
+
+        warnings: list[str] = []
+        entry = self.market_order(ticker, quantity, dry_run=False)
+
+        try:
+            stop = self.stop_order(
+                ticker, -quantity, stop_price,
+                dry_run=False, time_validity="GOOD_TILL_CANCEL",
+            )
+        except Exception as exc:
+            stop = {"error": str(exc)}
+            warnings.append(f"Stop-loss leg failed: {exc}. Position UNPROTECTED.")
+
+        try:
+            tp = self.limit_order(
+                ticker, -quantity, take_profit_price,
+                dry_run=False, time_validity="GOOD_TILL_CANCEL",
+            )
+        except Exception as exc:
+            tp = {"error": str(exc)}
+            warnings.append(f"Take-profit leg failed: {exc}.")
+
+        return {"entry": entry, "stop_loss": stop, "take_profit": tp, "warnings": warnings}

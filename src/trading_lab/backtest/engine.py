@@ -46,9 +46,17 @@ class BacktestEngine:
     simulator.
     """
 
-    def __init__(self, strategy: Strategy, initial_capital: float = 10_000.0) -> None:
+    def __init__(
+        self,
+        strategy: Strategy,
+        initial_capital: float = 10_000.0,
+        commission_pct: float = 0.0,
+        slippage_pct: float = 0.0,
+    ) -> None:
         self._strategy = strategy
         self._initial_capital = initial_capital
+        self._commission_pct = commission_pct
+        self._slippage_pct = slippage_pct
 
     def run(
         self,
@@ -87,30 +95,35 @@ class BacktestEngine:
 
             # -- Entry -------------------------------------------------
             if signal.action == SignalAction.BUY and open_trade is None:
+                entry_price = price * (1 + self._slippage_pct)
                 qty = max(signal.suggested_quantity, 1.0)
-                cost = qty * price
-                if cost > cash:
-                    # Cannot afford full position; scale down.
-                    qty = cash / price
-                    cost = cash
-                cash -= cost
+                cost = qty * entry_price
+                commission = cost * self._commission_pct
+                if cost + commission > cash:
+                    qty = cash / (entry_price * (1 + self._commission_pct))
+                    cost = qty * entry_price
+                    commission = cost * self._commission_pct
+                cash -= (cost + commission)
                 position = qty
                 open_trade = BacktestTrade(
                     entry_date=date,
-                    entry_price=price,
+                    entry_price=entry_price,
                     entry_signal=signal,
                 )
 
             # -- Exit --------------------------------------------------
             elif signal.action == SignalAction.SELL and open_trade is not None:
-                cash += position * price
-                pnl = (price - open_trade.entry_price) * position
+                exit_price = price * (1 - self._slippage_pct)
+                gross = position * exit_price
+                commission = gross * self._commission_pct
+                cash += gross - commission
+                pnl = (exit_price - open_trade.entry_price) * position
                 open_trade.exit_date = date
-                open_trade.exit_price = price
+                open_trade.exit_price = exit_price
                 open_trade.exit_signal = signal
-                open_trade.pnl = round(pnl, 4)
+                open_trade.pnl = round(pnl - commission, 4)
                 open_trade.return_pct = round(
-                    (price - open_trade.entry_price) / open_trade.entry_price * 100, 2
+                    (exit_price - open_trade.entry_price) / open_trade.entry_price * 100, 2
                 )
                 trades.append(open_trade)
                 position = 0.0
@@ -123,13 +136,16 @@ class BacktestEngine:
         # Close any open trade at the last price.
         if open_trade is not None:
             last_price = prices[-1]
-            cash += position * last_price
-            pnl = (last_price - open_trade.entry_price) * position
+            exit_price = last_price * (1 - self._slippage_pct)
+            gross = position * exit_price
+            commission = gross * self._commission_pct
+            cash += gross - commission
+            pnl = (exit_price - open_trade.entry_price) * position
             open_trade.exit_date = dates[-1]
-            open_trade.exit_price = last_price
-            open_trade.pnl = round(pnl, 4)
+            open_trade.exit_price = exit_price
+            open_trade.pnl = round(pnl - commission, 4)
             open_trade.return_pct = round(
-                (last_price - open_trade.entry_price) / open_trade.entry_price * 100, 2
+                (exit_price - open_trade.entry_price) / open_trade.entry_price * 100, 2
             )
             trades.append(open_trade)
 
