@@ -46,6 +46,23 @@ class SnapshotLogger:
                     approval_reason TEXT    NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS watcher_events (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at    TEXT    NOT NULL,
+                    ticker        TEXT    NOT NULL,
+                    drawdown_pct  REAL    NOT NULL,
+                    action_taken  TEXT    NOT NULL,
+                    details       TEXT    DEFAULT ''
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS watcher_state (
+                    key         TEXT    PRIMARY KEY,
+                    value       TEXT    NOT NULL,
+                    updated_at  TEXT    NOT NULL
+                )
+            """)
 
     def save_snapshot(self, snapshot_type: str, data: Any) -> None:
         """Write an API response blob to the snapshots table."""
@@ -86,3 +103,43 @@ class SnapshotLogger:
                     approval_reason,
                 ),
             )
+
+    def save_watcher_event(
+        self, ticker: str, drawdown_pct: float, action_taken: str, details: str = ""
+    ) -> None:
+        created_at = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """INSERT INTO watcher_events (created_at, ticker, drawdown_pct, action_taken, details)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (created_at, ticker, round(drawdown_pct, 4), action_taken, details),
+            )
+
+    def save_watcher_state(self, key: str, value: str) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO watcher_state (key, value, updated_at)
+                   VALUES (?, ?, ?)""",
+                (key, value, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def get_watcher_state(self, key: str) -> str | None:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT value FROM watcher_state WHERE key = ?", (key,)
+            ).fetchone()
+            return row[0] if row else None
+
+    def get_watcher_events(self, limit: int = 20) -> list[dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM watcher_events ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_all_watcher_state(self) -> dict[str, str]:
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute("SELECT key, value FROM watcher_state").fetchall()
+            return {row[0]: row[1] for row in rows}

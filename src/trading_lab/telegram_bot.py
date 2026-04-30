@@ -46,6 +46,8 @@ from trading_lab.agentic.portfolio import PortfolioManager
 from trading_lab.brokers.trading212 import Trading212Client
 from trading_lab.config import get_settings
 from trading_lab.logger import SnapshotLogger
+from trading_lab.watcher.kill_switch import KillSwitch
+from trading_lab.watcher.loop import PositionWatcher
 
 # -- Constants -----------------------------------------------------------------
 
@@ -64,6 +66,8 @@ _COMMANDS = [
     ("/weekly", "Weekly report"),
     ("/dashboard", "Generate HTML dashboard"),
     ("/status", "Bot health check"),
+    ("/watcher", "Watcher daemon status"),
+    ("/reset", "Reset kill switch"),
     ("/help", "This message"),
 ]
 
@@ -399,6 +403,39 @@ async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_html(f"<b>Dashboard Error</b>\n<pre>{_esc(result)}</pre>")
 
 
+async def watcher_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = get_settings()
+    try:
+        watcher = PositionWatcher(settings)
+        status = watcher.status()
+        text = (
+            "<b>👁️ Watcher Status</b>\n\n"
+            f"Running: <code>{status['running']}</code>\n"
+            f"Autonomy Tier: <code>{status['tier']}</code>\n"
+            f"Interval: <code>{status['interval']}s</code>\n"
+            f"Kill Switch: <code>{status['kill_switch_state']}</code>\n"
+            f"Active Alerts: <code>{status.get('open_alerts', {})}</code>"
+        )
+    except Exception as exc:
+        text = f"<b>Watcher Error</b>\n<pre>{_esc(exc)}</pre>"
+    await update.message.reply_html(text)
+
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = get_settings()
+    try:
+        logger = SnapshotLogger(settings.db_path)
+        ks = KillSwitch(logger)
+        ks.load_state()
+        if ks.is_fired():
+            ks.reset()
+            await update.message.reply_html("<b>✅ Kill switch reset.</b> Trading can resume.")
+        else:
+            await update.message.reply_html("Kill switch is not active.")
+    except Exception as exc:
+        await update.message.reply_html(f"<b>Error</b>\n<pre>{_esc(exc)}</pre>")
+
+
 # -- Entry point ---------------------------------------------------------------
 
 def create_application(token: str) -> Application:
@@ -413,6 +450,8 @@ def create_application(token: str) -> Application:
     app.add_handler(CommandHandler("journal", journal_command))
     app.add_handler(CommandHandler("weekly", weekly_command))
     app.add_handler(CommandHandler("dashboard", dashboard_command))
+    app.add_handler(CommandHandler("watcher", watcher_command))
+    app.add_handler(CommandHandler("reset", reset_command))
 
     order_conv = ConversationHandler(
         entry_points=[

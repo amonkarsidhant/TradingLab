@@ -31,6 +31,9 @@ class Settings:
     t212_api_key_isa: str = ""
     t212_api_secret_isa: str = ""
     t212_extended_hours: bool = False
+    watcher_enabled: bool = False
+    watcher_interval: int = 300
+    watcher_autonomy_tier: int = 1
 
     @property
     def base_url(self) -> str:
@@ -77,4 +80,7 @@ def get_settings() -> Settings:
         t212_api_key_isa=os.getenv("T212_API_KEY_STOCKS_ISA", ""),
         t212_api_secret_isa=os.getenv("T212_API_SECRET_STOCKS_ISA", ""),
         t212_extended_hours=_as_bool(os.getenv("T212_EXTENDED_HOURS"), False),
+        watcher_enabled=_as_bool(os.getenv("T212_WATCHER_ENABLED"), False),
+        watcher_interval=int(os.getenv("T212_WATCHER_INTERVAL", "300")),
+        watcher_autonomy_tier=int(os.getenv("T212_WATCHER_AUTONOMY_TIER", "1")),
     )
