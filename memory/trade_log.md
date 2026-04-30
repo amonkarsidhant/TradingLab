@@ -1,16 +1,17 @@
 # Trade Log
 
-## Open Positions (as of 2026-04-29)
+## Open Positions (as of 2026-04-30)
 
-| Ticker | Qty | Entry | Current | P&L % | Strategy | Days Held |
-|---|---|---|---|---|---|---|
-| AAPL_US_EQ | 1 | €269.32 | €269.03 | -0.11% | simple_momentum | 0 |
-| NVDA_US_EQ | 1 | €211.34 | €210.76 | -0.27% | simple_momentum | 0 |
-| MSFT_US_EQ | 1 | €425.30 | €424.50 | -0.19% | simple_momentum | 0 |
-| AMZN_US_EQ | 1 | €265.23 | €263.38 | -0.70% | simple_momentum | 0 |
-| GOOGL_US_EQ | 1 | €352.37 | €350.62 | -0.50% | simple_momentum | 0 |
-| AMD_US_EQ | 1 | €333.23 | €328.21 | -1.51% | simple_momentum | 0 |
-| INTC_US_EQ | 1 | €93.17 | €92.80 | -0.40% | simple_momentum | 0 |
+| Ticker | Qty | Entry | Current | P&L % | Strategy | Days Held | Stop |
+|---|---|---|---|---|---|---|---|
+| GOOGL_US_EQ | 1 | €352.37 | €374.40 | +6.36% | simple_momentum | 1 | €327.70 |
+| AMD_US_EQ | 1 | €333.23 | €347.46 | +4.27% | simple_momentum | 1 | €309.90 |
+| AAPL_US_EQ | 1 | €269.32 | €271.88 | +0.95% | simple_momentum | 1 | €250.47 |
+| INTC_US_EQ | 1 | €93.17 | €93.55 | +0.41% | simple_momentum | 1 | €86.65 |
+| KO_US_EQ | 1 | €78.49 | €78.50 | +0.01% | simple_momentum | 0 | €73.00 |
+| NVDA_US_EQ | 1 | €211.34 | €200.26 | -5.24% | simple_momentum | 1 | €196.55 |
+| AMZN_US_EQ | 1 | €265.23 | €258.36 | -2.59% | simple_momentum | 1 | €246.66 |
+| MSFT_US_EQ | 1 | €425.30 | €403.35 | -5.17% | simple_momentum | 1 | €395.53 |
 
 ## Recent Trades
 
@@ -23,31 +24,26 @@
 | 2026-04-29 | GOOGL_US_EQ | BUY | 1 | €352.37 | Momentum +5.26% |
 | 2026-04-29 | AMD_US_EQ | BUY | 1 | €333.23 | Momentum +13.61% |
 | 2026-04-29 | INTC_US_EQ | BUY | 1 | €93.17 | Momentum +27.56% |
+| 2026-04-30 | KO_US_EQ | BUY | 1 | €78.49 | Momentum +5.68% — diversification |
+| 2026-04-30 | MSFT_US_EQ | STOP (GTC) | -1 | €395.53 | Auto stop at -7% from entry |
+| 2026-04-30 | NVDA_US_EQ | STOP (GTC) | -1 | €196.55 | Auto stop at -7% from entry |
+| 2026-04-30 | AMZN_US_EQ | STOP (GTC) | -1 | €246.66 | Auto stop at -7% from entry |
+| 2026-04-30 | AAPL_US_EQ | STOP (GTC) | -1 | €250.47 | Auto stop at -7% from entry |
+| 2026-04-30 | AMD_US_EQ | STOP (GTC) | -1 | €309.90 | Auto stop at -7% from entry |
+| 2026-04-30 | GOOGL_US_EQ | STOP (GTC) | -1 | €327.70 | Auto stop at -7% from entry |
+| 2026-04-30 | INTC_US_EQ | STOP (GTC) | -1 | €86.65 | Auto stop at -7% from entry |
+| 2026-04-30 | KO_US_EQ | STOP (GTC) | -1 | €73.00 | Auto stop at -7% from entry |
 
 ## Performance
 
 - Starting capital: €5,000
-- Current value: €4,988.77
-- Return: -0.22%
-- Cash: €3,330.87
-- Invested: €1,657.90
-- Benchmark (S&P 500): TBD
-
-## Scan Results (2026-04-30)
-
-simple_momentum scan across Core watchlist:
-- NVDA: BUY 0.95 (+6.65%) — held
-- GOOGL: BUY 0.95 (+5.26%) — held
-- AMD: BUY 0.95 (+13.61%) — held, aggressive momentum
-- AMZN: BUY 0.89 (+3.92%) — held
-- TSLA: SELL 0.77 (-2.69%) — not held
-- AAPL: BUY 0.67 (+1.71%) — below threshold
-- MSFT: BUY 0.62 (+1.20%) — below threshold
-- META: HOLD (flat)
-- ma_crossover/mean_reversion: all HOLD (insufficient data — need 31/16 pts, got 6)
+- Current value: €4,992.23
+- Return: -0.16%
+- Cash: €3,263.84
+- Invested: €1,728.39
+- Positions: 8 (7 tech + 1 consumer staples)
+- Active stops: 8 (all positions protected)
 
 ## Notes
 
-All positions are US tech, momentum-chasing at local highs. Need to diversify.
-INTC entry at +27.56% momentum is aggressive — monitor closely.
-AMD at +13.61% also aggressive — set tight -7% stops on both.
+All 8 positions now have GTC stop orders at -7% from entry. Portfolio diversified away from pure tech with KO entry. MSFT (-5.17%) and NVDA (-5.24%) are the most at-risk positions. Watcher daemon ready to deploy on VPS for real-time monitoring.
