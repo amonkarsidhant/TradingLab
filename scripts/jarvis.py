@@ -22,8 +22,11 @@ Safety:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import os
 import time
+
+import requests
 
 from trading_lab.agentic.market_regime import MarketRegimeDetector
 from trading_lab.agentic.portfolio import PortfolioManager
@@ -49,6 +52,43 @@ def _t212_to_yahoo(t212_ticker: str) -> str:
     if t212_ticker.endswith("_EQ"):
         return t212_ticker[:-3]
     return t212_ticker
+
+
+def check_earnings(tickers: list[str], days_ahead: int = 7) -> dict[str, list[dict]]:
+    """
+    Check upcoming earnings for a list of tickers via FMP free API.
+    Returns {ticker: [earnings_events]} for events within days_ahead.
+    No API key required for the earnings calendar endpoint (free tier).
+    """
+    api_key = os.environ.get("FMP_API_KEY", "")
+    today = datetime.now(timezone.utc).date()
+    end = today + timedelta(days=days_ahead)
+
+    # FMP earnings calendar endpoint (free, no key needed for basic data)
+    url = (
+        f"https://financialmodelingprep.com/api/v3/earning_calendar"
+        f"?from={today}&to={end}"
+        f"&apikey={api_key}"
+    )
+
+    flagged: dict[str, list[dict]] = {}
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, list):
+            return flagged
+
+        # Normalize ticker lookup
+        lookup = {t.upper(): t for t in tickers}
+        for event in data:
+            sym = event.get("symbol", "").upper()
+            if sym in lookup:
+                flagged.setdefault(lookup[sym], []).append(event)
+    except Exception as exc:
+        print(f"  Earnings check skipped ({exc})")
+
+    return flagged
 
 
 # -- Main loop ------------------------------------------------------------------
@@ -133,6 +173,27 @@ def main():
         print(f"  {p.ticker}: {p.quantity} @ €{p.avg_price:.2f} → €{p.current_price:.2f} (P&L: €{p.unrealized_pnl:.2f})")
     print()
 
+    # 1b. Earnings check — existing positions
+    print("--- Earnings Watch (Existing Positions) ---")
+    if state.positions:
+        pos_tickers = [_t212_to_yahoo(p.ticker) for p in state.positions]
+        pos_earnings = check_earnings(pos_tickers, days_ahead=5)
+        warned = False
+        for pos in state.positions:
+            yahoo_sym = _t212_to_yahoo(pos.ticker)
+            events = pos_earnings.get(yahoo_sym, [])
+            if events:
+                for ev in events:
+                    date = ev.get("date", "?")
+                    eps_est = ev.get("epsEstimated", "N/A")
+                    print(f"  ⚠️  {pos.ticker}: earnings on {date} (eps est {eps_est})")
+                warned = True
+        if not warned:
+            print("  No earnings events in next 5 days.")
+    else:
+        print("  No open positions.")
+    print()
+
     target_size = pm.target_position_size(state)
     if regime:
         target_size *= regime.position_size_multiplier
@@ -194,10 +255,10 @@ def main():
         state = pm.state()
         print(f"Post-rebalance: Cash €{state.cash:,.2f}, Positions {len(state.positions)}")
         print()
-
     # 3. Scan watchlist for BUY signals
     buy_candidates = []
     print("--- Scanning Watchlist for BUY Signals ---")
+
     open_tickers = pm.get_open_tickers(state)
 
     for t212_ticker in WATCHLIST:
@@ -229,6 +290,28 @@ def main():
         except Exception as exc:
             print(f"  {t212_ticker}: SKIP — {exc}")
     print()
+
+    # 3b. Earnings check — candidates
+    if buy_candidates:
+        print("--- Earnings Watch (Candidates) ---")
+        cand_tickers = [_t212_to_yahoo(c[0].ticker) for c in buy_candidates]
+        cand_earnings = check_earnings(cand_tickers, days_ahead=7)
+        warned = False
+        for signal, prices, numeric_score, score_result, strat_name in buy_candidates:
+            yahoo_sym = _t212_to_yahoo(signal.ticker)
+            events = cand_earnings.get(yahoo_sym, [])
+            if events:
+                for ev in events:
+                    date = ev.get("date", "?")
+                    eps_est = ev.get("epsEstimated", "N/A")
+                    print(f"  ⚠️  {signal.ticker}: earnings on {date} (eps est {eps_est}) — review before buying")
+                warned = True
+        if not warned:
+            print("  No earnings events in next 7 days for candidates.")
+        print()
+    else:
+        print("--- No candidates to check for earnings ---")
+        print()
 
     # 4. Rank and execute top BUYs
     buy_orders = []
