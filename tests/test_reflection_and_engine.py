@@ -256,6 +256,13 @@ def _build_engine_no_state() -> MungerReflectionEngine:
     engine.settings = MagicMock(db_path="./x.sqlite3")
     engine.pm = MagicMock()
     engine.regime_detector = MagicMock()
+    engine.round_trips = MagicMock()
+    engine.round_trips.get_sharpe_for.return_value = {
+        "win_rate": 0.5, "loss_rate": 0.5, "avg_return_wins": 0.1,
+        "avg_return_losses": -0.05, "total_round_trips": 10,
+        "avg_bars_open": 5.0, "max_consecutive_wins": 3,
+        "max_consecutive_losses": 2,
+    }
     return engine
 
 
