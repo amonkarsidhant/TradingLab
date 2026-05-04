@@ -220,9 +220,10 @@ def main():
                 signal = strategy.generate_signal(ticker=t212_ticker, prices=prices)
 
                 if signal.action == SignalAction.BUY and signal.confidence >= 0.50:
-                    score = scorer.score(strat_name, t212_ticker)
-                    buy_candidates.append((signal, prices, score, strat_name))
-                    print(f"  {t212_ticker}: BUY ({strat_name}, conf={signal.confidence:.2f}, score={score})")
+                    score_result = scorer.score(strat_name, t212_ticker)
+                    numeric_score = score_result.get("score", 0)
+                    buy_candidates.append((signal, prices, numeric_score, score_result, strat_name))
+                    print(f"  {t212_ticker}: BUY ({strat_name}, conf={signal.confidence:.2f}, score={numeric_score})")
                     break
         except Exception as exc:
             print(f"  {t212_ticker}: SKIP — {exc}")
@@ -234,7 +235,7 @@ def main():
         print("--- Executing Top BUY Signals ---")
         buy_candidates.sort(key=lambda x: x[2], reverse=True)
 
-        for signal, prices, score, strat_name in buy_candidates:
+        for signal, prices, numeric_score, score_result, strat_name in buy_candidates:
             if not pm.can_add_position(state):
                 print(f"  Position limit reached. Skipping remaining.")
                 break
@@ -249,7 +250,7 @@ def main():
                 continue
 
             quantity = max(1, int(target / current_price))
-            print(f"  {signal.ticker}: score={score} → buying {quantity} shares @ ~€{current_price:.2f} (target €{target:,.2f})")
+            print(f"  {signal.ticker}: score={numeric_score} → buying {quantity} shares @ ~€{current_price:.2f} (target €{target:,.2f})")
 
             try:
                 result = pm.place_order(signal.ticker, quantity)
