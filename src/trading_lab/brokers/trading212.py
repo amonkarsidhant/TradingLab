@@ -678,8 +678,31 @@ class Trading212Client:
                 "Order placement is disabled. Keep it disabled during the 30-day trading sprint."
             )
 
+        # Pre-flight logging for sells — helps debug 400 errors
+        if quantity < 0:
+            logger.info("SELL payload: ticker=%s quantity=%s payload=%s", ticker, quantity, payload)
+
         return self._request("POST", "/equity/orders/market", json=payload)
 
+    def close_position(self, ticker: str) -> dict[str, Any]:
+        """Sell entire available position for a ticker.
+
+        Queries current positions, finds the exact quantity available for trading,
+        and places a market sell. This avoids rounding/sign issues with manual qty.
+        """
+        if not self.settings.can_place_orders:
+            raise RuntimeError("Order placement is disabled.")
+
+        positions = self.positions()
+        for p in positions:
+            if p.get("instrument", {}).get("ticker") == ticker:
+                available = p.get("quantityAvailableForTrading", 0)
+                if available <= 0:
+                    return {"error": f"No available shares to sell for {ticker}"}
+                payload = {"ticker": ticker, "quantity": -float(available)}
+                logger.info("CLOSE payload: %s", payload)
+                return self._request("POST", "/equity/orders/market", json=payload)
+        return {"error": f"No position found for {ticker}"}
     def limit_order(
         self,
         ticker: str,

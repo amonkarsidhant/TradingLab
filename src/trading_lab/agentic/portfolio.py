@@ -174,7 +174,31 @@ class PortfolioManager:
 
     def sell_position(self, position: Position) -> dict:
         qty = position.quantity_available or position.quantity
-        result = self.place_order(position.ticker, -int(round(qty)))
+        if qty <= 0:
+            return {"error": f"No available quantity to sell for {position.ticker} (qty={qty})"}
+
+        # Try T212 close_position first (queries exact available qty from API)
+        try:
+            result = self.client.close_position(position.ticker)
+        except Exception:
+            # Fallback: manual negative quantity
+            sell_qty = -float(qty)
+            try:
+                result = self.place_order(position.ticker, sell_qty)
+            except Exception as exc:
+                int_fallback = -int(qty)
+                if int_fallback != sell_qty:
+                    try:
+                        result = self.place_order(position.ticker, int_fallback)
+                    except Exception as exc2:
+                        raise RuntimeError(
+                            f"SELL failed for {position.ticker}: close_position failed, "
+                            f"exact qty {sell_qty} failed ({exc}), "
+                            f"int fallback {int_fallback} also failed ({exc2})"
+                        ) from exc2
+                else:
+                    raise
+
         peaks = self._load_peaks()
         peaks.pop(position.ticker, None)
         self._save_peaks(peaks)
