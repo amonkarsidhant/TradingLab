@@ -294,14 +294,6 @@ class Trading212Client:
         "/equity/orders/stop_limit",
     )
 
-
-class Trading212Client:
-    """
-    Trading212 API client with:
-    - idempotency key caching for order placement
-    - failure alert throttling per endpoint + error signature
-    """
-
     def __init__(self, settings: Settings):
         self.settings = settings
         self.base_url = settings.base_url.rstrip("/")
