@@ -131,21 +131,23 @@ class BacktestEngine:
                     (exit_price - open_trade.entry_price) / open_trade.entry_price * 100, 2
                 )
                 trades.append(open_trade)
+                # -- Record to round-trip tracker BEFORE nulling out -----
+                closed_trade = open_trade
+                closed_qty = position
                 position = 0.0
                 open_trade = None
-                # -- Record to round-trip tracker ------------------------
                 if tracker is not None:
                     trip = RoundTrip(
                         ticker=ticker,
-                        position_id=f"{ticker}_{open_trade.entry_date}",
-                        entry_price=open_trade.entry_price,
+                        position_id=f"{ticker}_{closed_trade.entry_date}",
+                        entry_price=closed_trade.entry_price,
                         exit_price=exit_price,
-                        quantity=position,
-                        pnl=round(open_trade.pnl or 0, 2),
-                        pnl_pct=round(open_trade.return_pct or 0, 2),
+                        quantity=closed_qty,
+                        pnl=round(closed_trade.pnl or 0, 2),
+                        pnl_pct=round(closed_trade.return_pct or 0, 2),
                         days_held=0,
-                        strategy=open_trade.entry_signal.strategy,
-                        entry_date=open_trade.entry_date,
+                        strategy=closed_trade.entry_signal.strategy,
+                        entry_date=closed_trade.entry_date,
                         exit_date=date,
                     )
                     tracker.record(trip)
