@@ -684,7 +684,7 @@ class Trading212Client:
 
         return self._request("POST", "/equity/orders/market", json=payload)
 
-    def close_position(self, ticker: str) -> dict[str, Any]:
+    def close_position(self, ticker: str, dry_run: bool = False) -> dict[str, Any]:
         """Sell entire available position for a ticker.
 
         Queries current positions, finds the exact quantity available for trading,
@@ -698,11 +698,13 @@ class Trading212Client:
             if p.get("instrument", {}).get("ticker") == ticker:
                 available = p.get("quantityAvailableForTrading", 0)
                 if available <= 0:
-                    return {"error": f"No available shares to sell for {ticker}"}
+                    return {"error": f"No available shares to sell for {ticker}", "dry_run": dry_run}
                 payload = {"ticker": ticker, "quantity": -float(available)}
+                if dry_run:
+                    return {"dry_run": True, "message": f"Would sell {available} shares of {ticker}", "payload": payload}
                 logger.info("CLOSE payload: %s", payload)
                 return self._request("POST", "/equity/orders/market", json=payload)
-        return {"error": f"No position found for {ticker}"}
+        return {"error": f"No position found for {ticker}", "dry_run": dry_run}
     def limit_order(
         self,
         ticker: str,
