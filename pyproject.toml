@@ -1,9 +1,39 @@
 [project]
 name = "sid-trading-lab"
 version = "0.1.0"
-description = "Demo-first trading trading lab with Trading 212 integration"
-requires-python = ">=3.10"
+description = "Demo-first supervised trading research lab with Trading 212 integration"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.14"
+authors = [
+    {name = "Sidhant Amonkar", email = "amonkarsidhant@gmail.com"}
+]
+keywords = ["trading", "backtest", "demo-trading", "trading212", "ai-supervised", "telegram-bot", "macos"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+[project.urls]
+Homepage = "https://github.com/amonkarsidhant/TradingLab"
+Repository = "https://github.com/amonkarsidhant/TradingLab.git"
+Issues = "https://github.com/amonkarsidhant/TradingLab/issues"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.black]
+line-length = 100
+target-version = ["py314"]
