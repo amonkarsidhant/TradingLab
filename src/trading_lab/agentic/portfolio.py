@@ -173,7 +173,8 @@ class PortfolioManager:
         )
 
     def sell_position(self, position: Position) -> dict:
-        result = self.place_order(position.ticker, -position.quantity_available or -position.quantity)
+        qty = position.quantity_available or position.quantity
+        result = self.place_order(position.ticker, -int(round(qty)))
         peaks = self._load_peaks()
         peaks.pop(position.ticker, None)
         self._save_peaks(peaks)
