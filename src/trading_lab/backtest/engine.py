@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+PROJECT_DIR = Path(__file__).resolve().parent.parent.parent.parent
+
 from trading_lab.backtest.metrics import compute_metrics
 from trading_lab.models import Signal, SignalAction
 from trading_lab.round_trips import RoundTrip, RoundTripTracker
@@ -65,6 +67,7 @@ class BacktestEngine:
         prices: list[float],
         dates: list[str] | None = None,
         ticker: str = "TEST",
+        tracker: RoundTripTracker | None = None,
     ) -> BacktestResult:
         if dates is None:
             dates = [str(i) for i in range(len(prices))]
@@ -79,9 +82,10 @@ class BacktestEngine:
         signals: list[Signal] = []
         trades: list[BacktestTrade] = []
         open_trade: BacktestTrade | None = None
-        tracker = RoundTripTracker(
-            str(Path("./round_trips.sqlite3"))
-        )
+        if tracker is None:
+            tracker = RoundTripTracker(
+                str(PROJECT_DIR / "data/round_trips.sqlite3")
+            )
 
         # Find the minimum window size the strategy needs.
         # We determine this empirically: feed growing windows until the

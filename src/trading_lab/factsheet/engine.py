@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from trading_lab.backtest.engine import BacktestEngine, BacktestResult
 from trading_lab.backtest.sweep import SweepEngine
+from trading_lab.round_trips import NullRoundTripTracker
 from trading_lab.strategies.base import StrategyMetadata
 from trading_lab.strategies import get_strategy, list_strategies
 
@@ -77,7 +78,7 @@ class FactsheetEngine:
             from trading_lab.data.market_data import make_provider
             provider = make_provider(source="chained", ticker=self.ticker, cache_db="./trading_lab_cache.sqlite3")
             prices = provider.get_prices(ticker=self.ticker, lookback=252)
-        return engine.run(prices=prices, ticker=self.ticker)
+        return engine.run(prices=prices, ticker=self.ticker, tracker=NullRoundTripTracker())
 
     def cost_sensitivity(self, prices):
         results = []

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from trading_lab.backtest.engine import BacktestEngine, BacktestResult
+from trading_lab.round_trips import NullRoundTripTracker
 from trading_lab.strategies.base import Strategy
 
 
@@ -70,7 +71,7 @@ class SweepEngine:
             kwargs = dict(zip(param_names, combo))
             strategy = self._cls(**kwargs)
             engine = BacktestEngine(strategy, initial_capital=self._capital)
-            bt_result = engine.run(prices=prices, dates=dates, ticker=ticker)
+            bt_result = engine.run(prices=prices, dates=dates, ticker=ticker, tracker=NullRoundTripTracker())
             bt_result.strategy_name = f"{strategy.name}({self._format_params(kwargs)})"
             results.append(bt_result)
 

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -26,6 +28,15 @@ class RoundTrip:
     id: int | None = None
 
 
+def _sharpe(returns: list[float], risk_free_rate: float = 0.04) -> float:
+    if len(returns) < 2:
+        return 0.0
+    mean_ret = sum(returns) / len(returns)
+    var = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)
+    std = var ** 0.5
+    return (mean_ret - risk_free_rate / 252) / std * (252 ** 0.5) if std > 0 else 0.0
+
+
 class RoundTripTracker:
     """Tracks round trips from executed trades in the signals table."""
 
@@ -34,6 +45,7 @@ class RoundTripTracker:
         self._init_db()
 
     def _init_db(self) -> None:
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS round_trips (
@@ -53,6 +65,7 @@ class RoundTripTracker:
             """)
 
     def record(self, round_trip: RoundTrip) -> None:
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """INSERT INTO round_trips
@@ -75,6 +88,7 @@ class RoundTripTracker:
             )
 
     def get_trips(self, ticker: str = "", limit: int = 50) -> list[RoundTrip]:
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             sql = "SELECT * FROM round_trips"
@@ -109,10 +123,7 @@ class RoundTripTracker:
             return {"trips": 0, "sharpe": None, "avg_pnl_pct": None, "win_rate": None}
 
         returns = [t.pnl_pct / 100 for t in trips]
-        mean_ret = sum(returns) / len(returns)
-        var = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1) if len(returns) > 1 else 0
-        std = var ** 0.5
-        sharpe = (mean_ret - risk_free_rate / 252) / std * (252 ** 0.5) if std > 0 else 0.0
+        sharpe = _sharpe(returns, risk_free_rate)
 
         wins = sum(1 for t in trips if t.pnl > 0)
         return {
@@ -121,3 +132,41 @@ class RoundTripTracker:
             "avg_pnl_pct": round(sum(t.pnl_pct for t in trips) / len(trips), 2),
             "win_rate": round(wins / len(trips) * 100, 1),
         }
+
+    def stats(self) -> dict[str, Any]:
+        trips = self.get_trips(limit=10_000)
+        if not trips:
+            return {"trips": 0, "sharpe": 0, "avg_pnl_pct": 0, "win_rate": 0}
+
+        returns = [t.pnl_pct for t in trips]
+        sharpe = _sharpe(returns)
+
+        wins = sum(1 for t in trips if t.pnl > 0)
+        return {
+            "trips": len(trips),
+            "sharpe": round(sharpe, 2),
+            "avg_pnl_pct": round(sum(t.pnl_pct for t in trips) / len(trips), 2),
+            "win_rate": round(wins / len(trips) * 100, 1),
+        }
+
+
+class NullRoundTripTracker(RoundTripTracker):
+    """No-op tracker for parameter sweeps to avoid SQLite file-descriptor exhaustion."""
+
+    def __init__(self) -> None:
+        pass
+
+    def _init_db(self) -> None:
+        pass
+
+    def record(self, round_trip: RoundTrip) -> None:
+        pass
+
+    def get_trips(self, ticker: str = "", limit: int = 50) -> list[RoundTrip]:
+        return []
+
+    def get_sharpe_for(self, ticker: str = "", risk_free_rate: float = 0.04) -> dict:
+        return {"trips": 0, "sharpe": None, "avg_pnl_pct": None, "win_rate": None}
+
+    def stats(self) -> dict[str, Any]:
+        return {"trips": 0, "sharpe": 0, "avg_pnl_pct": 0, "win_rate": 0}
