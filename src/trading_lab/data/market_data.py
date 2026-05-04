@@ -23,6 +23,7 @@ from typing import Protocol
 import pandas as pd
 
 from trading_lab.data.price_cache import SqlitePriceCache
+from trading_lab.brokers.trading212 import _t212_ticker_to_yf
 
 logger = logging.getLogger(__name__)
 
@@ -165,10 +166,11 @@ class YFinanceMarketDataProvider:
             logger.debug("Price cache hit for %s (%d rows)", ticker, len(cached))
             return pd.DataFrame(cached)[["date", "open", "high", "low", "close", "volume"]]
 
-        logger.info("Fetching %s from Yahoo Finance (%s → %s)", ticker, start_str, end_str)
+        yf_symbol = _t212_ticker_to_yf(ticker)
+        logger.info("Fetching %s from Yahoo Finance (yf: %s, %s → %s)", ticker, yf_symbol, start_str, end_str)
         try:
             raw: pd.DataFrame = yf.download(
-                ticker, start=start_str, end=end_str, progress=False, auto_adjust=True
+                yf_symbol, start=start_str, end=end_str, progress=False, auto_adjust=True
             )
         except Exception as exc:
             logger.warning("yfinance download failed for %s: %s", ticker, exc)

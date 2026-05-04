@@ -9,3 +9,4 @@ yfinance>=0.2.50
 mcp>=1.23.0
 python-multipart>=0.0.26
 python-telegram-bot[job-queue]>=20.0
+discord.py>=2.3.0

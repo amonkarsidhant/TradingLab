@@ -6,6 +6,6 @@ No real money. AI suggests, code executes, human can audit.
 """
 from trading_lab.agentic.market_regime import MarketRegimeDetector, RegimeParams
 from trading_lab.agentic.portfolio import PortfolioManager
-from trading_lab.agentic.scorer import SignalScorer
+from trading_lab.agentic.scorer import EntryScorer
 
-__all__ = ["PortfolioManager", "SignalScorer", "MarketRegimeDetector", "RegimeParams"]
+__all__ = ["PortfolioManager", "EntryScorer", "MarketRegimeDetector", "RegimeParams"]

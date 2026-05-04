@@ -6,6 +6,8 @@ __pycache__/
 /data/
 *.log
 .DS_Store
+*.archived
+logs/
 
 # Claude Code local session state — not project config (CLAUDE.md is kept)
 .claude/

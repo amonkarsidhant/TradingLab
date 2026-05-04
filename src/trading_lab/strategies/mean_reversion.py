@@ -1,38 +1,39 @@
+from __future__ import annotations
+
 from trading_lab.models import Signal, SignalAction
-from trading_lab.strategies.base import Strategy, StrategyMetadata
+from trading_lab.strategies.base import Strategy, register_strategy
 
 
+@register_strategy(
+    name="mean_reversion",
+    category="mean_reversion",
+    hypothesis="Extreme price moves in one direction are likely to revert toward the mean. RSI below oversold signals a bounce; above overbought signals a pullback.",
+    expected_market_regime="ranging_calm",
+    failure_modes=[
+        "Catastrophic losses in strong trends: buying dips in a bear market (catching falling knives)",
+        "RSI can stay overbought/oversold for extended periods during strong trends",
+        "Fails in low-volatility markets where RSI rarely crosses thresholds",
+    ],
+    parameters={
+        "period": (14, "RSI calculation period (Wilder's smoothing)"),
+        "oversold": (30, "RSI threshold for oversold condition"),
+        "overbought": (70, "RSI threshold for overbought condition"),
+    },
+    required_data="close",
+)
 class MeanReversionStrategy(Strategy):
-    name = "mean_reversion"
-    metadata = StrategyMetadata(
-        name="mean_reversion",
-        category="mean_reversion",
-        hypothesis="Extreme price moves in one direction are likely to revert toward the mean. RSI below oversold signals a bounce; above overbought signals a pullback.",
-        expected_market_regime="ranging_calm",
-        failure_modes=[
-            "Catastrophic losses in strong trends: buying dips in a bear market (catching falling knives)",
-            "RSI can stay overbought/oversold for extended periods during strong trends",
-            "Fails in low-volatility markets where RSI rarely crosses thresholds",
-        ],
-        parameters={
-            "period": (14, "RSI calculation period (Wilder's smoothing)"),
-            "oversold": (30, "RSI threshold for oversold condition"),
-            "overbought": (70, "RSI threshold for overbought condition"),
-        },
-        required_data="close",
-    )
-
     def __init__(self, period: int = 14, oversold: int = 30, overbought: int = 70):
         if oversold >= overbought:
             raise ValueError(f"oversold ({oversold}) must be less than overbought ({overbought})")
         if period < 2:
             raise ValueError(f"period must be at least 2, got {period}")
+        super().__init__()
         self.period = period
         self.oversold = oversold
         self.overbought = overbought
 
     def generate_signal(self, ticker: str, prices: list[float]) -> Signal:
-        required = self.period + 2  # period for RSI calc + 1 for the crossover check
+        required = self.period + 2
         if len(prices) < required:
             return Signal(
                 strategy=self.name,
@@ -75,7 +76,6 @@ class MeanReversionStrategy(Strategy):
 
 
 def _rsi(prices: list[float], period: int) -> float:
-    """Wilder's RSI over the last `period` closes."""
     deltas = [prices[i] - prices[i - 1] for i in range(-period, 0)]
     gain = sum(d for d in deltas if d > 0) / period
     loss = sum(-d for d in deltas if d < 0) / period

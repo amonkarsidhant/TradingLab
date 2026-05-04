@@ -1,41 +1,28 @@
-"""
-Sentiment Strategy — uses market sentiment to generate signals.
+from __future__ import annotations
 
-For now this is a stub that returns HOLD, but the architecture is ready
-for integration with:
-  - Fear & Greed Index (CNN)
-  - Reddit / X sentiment APIs
-  - News sentiment (Adanos, etc.)
-  - Polymarket prediction markets
-
-When sentiment data is available, it will:
-  - BUY when fear is high (extreme fear = opportunity)
-  - SELL when greed is extreme (extreme greed = top)
-"""
 from trading_lab.models import Signal, SignalAction
-from trading_lab.strategies.base import Strategy, StrategyMetadata
+from trading_lab.strategies.base import Strategy, register_strategy
 
 
+@register_strategy(
+    name="sentiment",
+    category="sentiment",
+    hypothesis="Extreme market fear creates buying opportunities; extreme greed signals a top.",
+    expected_market_regime="any",
+    failure_modes=[
+        "Stub implementation — always returns HOLD until Fear & Greed Index is wired up",
+        "Sentiment can remain extreme for extended periods, leading to premature counter-trend entries",
+        "Requires external API integration for actionable signals",
+    ],
+    parameters={
+        "fear_threshold": (20, "Fear & Greed Index value below which is extreme fear"),
+        "greed_threshold": (80, "Fear & Greed Index value above which is extreme greed"),
+    },
+    required_data="sentiment",
+)
 class SentimentStrategy(Strategy):
-    name = "sentiment"
-    metadata = StrategyMetadata(
-        name="sentiment",
-        category="sentiment",
-        hypothesis="Extreme market fear creates buying opportunities; extreme greed signals a top.",
-        expected_market_regime="any",
-        failure_modes=[
-            "Stub implementation — always returns HOLD until Fear & Greed Index is wired up",
-            "Sentiment can remain extreme for extended periods, leading to premature counter-trend entries",
-            "Requires external API integration for actionable signals",
-        ],
-        parameters={
-            "fear_threshold": (20, "Fear & Greed Index value below which is extreme fear"),
-            "greed_threshold": (80, "Fear & Greed Index value above which is extreme greed"),
-        },
-        required_data="sentiment",
-    )
-
     def __init__(self, fear_threshold: int = 20, greed_threshold: int = 80):
+        super().__init__()
         self.fear_threshold = fear_threshold
         self.greed_threshold = greed_threshold
 

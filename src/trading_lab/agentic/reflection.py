@@ -19,6 +19,7 @@ from typing import Any
 from trading_lab.agentic.market_regime import MarketRegimeDetector
 from trading_lab.agentic.portfolio import PortfolioManager, PortfolioState
 from trading_lab.config import Settings
+from trading_lab.round_trips import RoundTripTracker
 from trading_lab.universes import SP500_BY_SECTOR
 
 
@@ -68,6 +69,7 @@ class ReflectionReport:
     sector_exposure: dict[str, float]
     not_to_do: list[str]
     munger_grade: str  # A-F
+    sharpe_info: dict  # from RoundTripTracker
 
 
 # Hard-coded circle of competence: what we understand
@@ -94,6 +96,7 @@ class MungerReflectionEngine:
         self.settings = settings
         self.pm = PortfolioManager(settings)
         self.regime_detector = MarketRegimeDetector()
+        self.round_trips = RoundTripTracker(settings.db_path)
 
     def reflect(self) -> ReflectionReport:
         state = self.pm.state()
@@ -110,6 +113,9 @@ class MungerReflectionEngine:
         cost_basis = sum(p.avg_price * p.quantity for p in state.positions)
         pnl_pct = (state.unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
 
+        # Sharpe from round trips (cherry-pick from go-trader)
+        sharpe_info = self.round_trips.get_sharpe_for()
+
         return ReflectionReport(
             portfolio_pnl_pct=round(pnl_pct, 2),
             cash_pct=round(state.cash / max(state.total_value, 1) * 100, 2),
@@ -119,6 +125,7 @@ class MungerReflectionEngine:
             sector_exposure=sector_exposure,
             not_to_do=not_to_do,
             munger_grade=munger_grade,
+            sharpe_info=sharpe_info,
         )
 
     def _detect_regime(self, state: PortfolioState) -> RegimeSummary:
@@ -306,4 +313,22 @@ class MungerReflectionEngine:
         for rule in report.not_to_do:
             lines.append(f"   • {rule}")
 
+        # Sharpe from round trips
+        if report.sharpe_info.get("trips", 0) > 0:
+            lines.append("")
+            lines.append("📈 **Round-Trip Sharpe:")
+            s = report.sharpe_info
+            lines.append(f"   Trips: {s['trips']}  |  Sharpe: {s.get('sharpe', 'N/A')}  |  Win Rate: {s.get('win_rate', 'N/A')}%  | Avg PnL: {s.get('avg_pnl_pct', 'N/A')}%")
+
         return "\n".join(lines)
+
+    def get_sharpe_summary(self) -> dict:
+        """Standalone Sharpe query for Discord bot /risk command augmentation."""
+        return self.round_trips.get_sharpe_for()
+
+    async def get_discord_risk_block(self) -> str:
+        """Full risk+Sharpe formatted for Discord."""
+        report = self.reflect()
+        text = self.format_reflection(report)
+        # Truncate for Discord 2000 char limit safety
+        return text[:1900] + "…" if len(text) > 1900 else text

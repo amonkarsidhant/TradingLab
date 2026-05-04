@@ -14,9 +14,11 @@ from datetime import datetime, timezone
 from trading_lab.brokers.trading212 import Trading212Client
 from trading_lab.config import Settings
 from trading_lab.logger import SnapshotLogger
+from trading_lab.watcher.concentration import ConcentrationGuard
 from trading_lab.watcher.guardrails import ALERT_THRESHOLDS, GuardrailEnforcer
 from trading_lab.watcher.kill_switch import KillSwitch, KillSwitchState
 from trading_lab.watcher.strategies import DeterministicStrategyRunner
+from trading_lab.watcher.tiered_stops import TieredStopLoss
 from trading_lab.watcher.tiers import AutonomyRouter
 
 _RUNNING = True
@@ -34,8 +36,18 @@ class PositionWatcher:
         self.kill_switch = KillSwitch(self.logger)
         self.det_strategies = DeterministicStrategyRunner(settings.db_path)
         self._interval = max(settings.watcher_interval, 60)
+        self._fast_interval = max(getattr(settings, "watcher_fast_interval", 90), 30)
+        self._warn_threshold = getattr(settings, "watcher_drawdown_warn_pct", 0.80)
         self._alerted: dict[str, set[float]] = {}
         self._peak_value: float = 0.0
+        self._concentration = ConcentrationGuard(
+            max_concentration_pct=getattr(settings, "max_concentration_pct", 60.0),
+            max_same_direction_pct=getattr(settings, "max_same_direction_pct", 75.0),
+            block_on_warning=False,
+        )
+        self._tiered_stops = TieredStopLoss(
+            tiers=getattr(settings, "tiered_stops", None)
+        )
 
     def run(self) -> None:
         self.kill_switch.load_state()
@@ -85,6 +97,29 @@ class PositionWatcher:
         if self.kill_switch.is_fired():
             return
 
+        # --- Portfolio-level concentration check (once per tick) ---
+        conc_ok, conc_warnings = self._concentration.check(
+            positions_raw,
+            {p["instrument"]["ticker"]: p.get("currentPrice", 0) for p in positions_raw if p.get("instrument")},
+        )
+        if conc_warnings:
+            for w in conc_warnings:
+                self._log("warning", f"Concentration: {w}")
+        if not conc_ok:
+            self._log("alert", f"🚫 Portfolio blocked — concentration breach ({conc_warnings[0]})")
+            for p in positions_raw:
+                ticker = p.get("instrument", {}).get("ticker", "?")
+                self.logger.save_watcher_event(
+                    ticker=ticker,
+                    drawdown_pct=0,
+                    action_taken="blocked_concentration",
+                    details="; ".join(conc_warnings),
+                )
+            # Still evaluate individual positions for logging, but skip buys
+
+        # Track max drawdown for interval acceleration
+        max_drawdown = 0.0
+
         # Per-position evaluation
         for p in positions_raw:
             inst = p.get("instrument", {})
@@ -97,8 +132,62 @@ class PositionWatcher:
 
             pnl_pct = (current_price - avg_price) / avg_price
             drawdown = abs(min(pnl_pct, 0))
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
 
+            # Skip further checks if concentration blocked (but still log)
+            if not conc_ok:
+                self.logger.save_watcher_event(
+                    ticker=ticker,
+                    drawdown_pct=drawdown,
+                    action_taken="monitored_conc_blocked",
+                )
+                continue
+
+            # --- Tiered stop evaluation ---
+            qty = float(p.get("quantity", p.get("filledQuantity", 0)))
+            tiers = getattr(self._tiered_stops, "tiers", [])
+            if qty > 0 and tiers and drawdown >= tiers[0].drawdown_pct:
+                tier = self._tiered_stops.evaluate(ticker, drawdown, qty)
+                if tier is not None:
+                    close_qty = qty * tier.close_fraction
+                    if self.autonomy.can_auto_sell():
+                        self._log(
+                            "action",
+                            f"🔻 {ticker} tiered stop at {drawdown*100:.1f}% — "
+                            f"closing {tier.close_fraction*100:.0f}% ({close_qty:.2f} shares)",
+                        )
+                        self.logger.save_watcher_event(
+                            ticker=ticker,
+                            drawdown_pct=drawdown,
+                            action_taken="tiered_stop",
+                            details=f"closed {tier.close_fraction} at {drawdown*100:.1f}%",
+                        )
+                        # Execute the partial close (demo-mode only)
+                        if self.autonomy.can_auto_sell():
+                            try:
+                                self.broker.market_order(
+                                    ticker=ticker,
+                                    quantity=-round(close_qty, 4),
+                                    dry_run=True,
+                                )
+                            except Exception as e:
+                                self._log("error", f"Tiered stop failed: {e}")
+                    else:
+                        self._log(
+                            "alert",
+                            f"🔻 {ticker} tiered stop at {drawdown*100:.1f}% — "
+                            f"{tier.close_fraction*100:.0f}% exit needed",
+                        )
+
+            # --- Normal drawdown alert chain (legacy) ---
             self._evaluate_position(ticker, drawdown, cash_pct, len(positions_raw))
+
+        # --- Interval acceleration ---
+        new_interval = self._accelerate_interval(drawdown)
+        if new_interval != self._interval:
+            self._interval = new_interval
+            self._log("info", f"Accelerated watcher interval to {new_interval}s")
 
         # Deterministic strategy check
         try:
@@ -152,6 +241,16 @@ class PositionWatcher:
 
     def _was_alerted(self, ticker: str, threshold: float) -> bool:
         return threshold in self._alerted.get(ticker, set())
+
+    def _accelerate_interval(self, max_drawdown: float) -> int:
+        """Speed up watcher polls when drawdown enters warning band."""
+        warn_pct = self._warn_threshold
+        if warn_pct <= 0 or max_drawdown <= 0:
+            return self.settings.watcher_interval
+        # When drawdown exceeds warn threshold, switch to fast interval
+        if max_drawdown >= warn_pct:
+            return self._fast_interval
+        return self.settings.watcher_interval
 
     def _mark_alerted(self, ticker: str, threshold: float) -> None:
         if ticker not in self._alerted:

@@ -1,34 +1,37 @@
+from __future__ import annotations
+
+from typing import Any
+
 from trading_lab.models import Signal, SignalAction
-from trading_lab.strategies.base import Strategy, StrategyMetadata
+from trading_lab.strategies.base import Strategy, register_strategy
 
 
+@register_strategy(
+    name="ma_crossover",
+    category="trend",
+    hypothesis="When a short-term moving average crosses above a long-term one, a new uptrend is confirmed. Cross below signals a downtrend.",
+    expected_market_regime="bull_trending",
+    failure_modes=[
+        "Whipsaws in ranging markets: crossovers produce false signals that reverse immediately",
+        "Lagging indicator: signals arrive late, missing the bulk of the move",
+        "Slow SMAs smooth out noise but also delay signal response to sudden reversals",
+    ],
+    parameters={
+        "fast": (10, "Fast SMA period"),
+        "slow": (30, "Slow SMA period (must be > fast)"),
+    },
+    required_data="close",
+)
 class MovingAverageCrossoverStrategy(Strategy):
-    name = "ma_crossover"
-    metadata = StrategyMetadata(
-        name="ma_crossover",
-        category="trend",
-        hypothesis="When a short-term moving average crosses above a long-term one, a new uptrend is confirmed. Cross below signals a downtrend.",
-        expected_market_regime="bull_trending",
-        failure_modes=[
-            "Whipsaws in ranging markets: crossovers produce false signals that reverse immediately",
-            "Lagging indicator: signals arrive late, missing the bulk of the move",
-            "Slow SMAs smooth out noise but also delay signal response to sudden reversals",
-        ],
-        parameters={
-            "fast": (10, "Fast SMA period"),
-            "slow": (30, "Slow SMA period (must be > fast)"),
-        },
-        required_data="close",
-    )
-
     def __init__(self, fast: int = 10, slow: int = 30):
         if fast >= slow:
             raise ValueError(f"fast period ({fast}) must be less than slow period ({slow})")
+        super().__init__()
         self.fast = fast
         self.slow = slow
 
     def generate_signal(self, ticker: str, prices: list[float]) -> Signal:
-        required = self.slow + 1  # need slow periods for the SMA + 1 for the crossover check
+        required = self.slow + 1
         if len(prices) < required:
             return Signal(
                 strategy=self.name,

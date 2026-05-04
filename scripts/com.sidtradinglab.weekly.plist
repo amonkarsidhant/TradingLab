@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sidtradinglab.weekly</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>export PYTHONPATH=/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/src:$PYTHONPATH; cd /Users/sidhantamonkar/Documents/Projects/sid-trading-lab; /Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli weekly-report --date today; /Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli strategy-comparison --ticker AAPL --data-source static; /Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli agent-reviews --week current</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>5</integer>
+        <key>Hour</key>
+        <integer>17</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/logs/weekly.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/logs/weekly_error.log</string>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

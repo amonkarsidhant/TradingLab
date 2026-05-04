@@ -294,6 +294,14 @@ class Trading212Client:
         "/equity/orders/stop_limit",
     )
 
+
+class Trading212Client:
+    """
+    Trading212 API client with:
+    - idempotency key caching for order placement
+    - failure alert throttling per endpoint + error signature
+    """
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self.base_url = settings.base_url.rstrip("/")
@@ -302,6 +310,8 @@ class Trading212Client:
         )
         self._idempotency_cache: dict[str, tuple[float, Any]] = {}
         self._idempotency_lock = threading.Lock()
+        from trading_lab.watcher.failure_alerts import FailureAlertThrottle
+        self._failure_throttle = FailureAlertThrottle()
 
     def _idempotency_key(self, method: str, path: str, json_body: Any) -> str:
         body = json.dumps(json_body, sort_keys=True, default=str) if json_body else ""
@@ -393,6 +403,7 @@ class Trading212Client:
                 result = response.json() if response.text.strip() else None
                 if idem_key is not None:
                     self._idempotency_put(idem_key, result)
+                self._failure_throttle.clear(endpoint_key)
                 return result
 
             if response.status_code == 429:
@@ -418,6 +429,13 @@ class Trading212Client:
 
         if last_error is not None:
             last_error.raise_for_status()
+        # Throttle alert on repeated API failures (go-trader port)
+        should_notify, count = self._failure_throttle.record(endpoint_key, str(last_error))
+        if should_notify:
+            logger.critical(
+                "%s",
+                self._failure_throttle.format_alert(endpoint_key, str(last_error), count),
+            )
         raise RuntimeError(f"Request failed after {self.MAX_RETRIES} retries")
 
     def _paginate(self, method: str, initial_path: str, **kwargs: Any) -> list[dict]:

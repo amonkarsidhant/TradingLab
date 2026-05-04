@@ -1,9 +1,10 @@
 {
-  "AMD_US_EQ": 343.29,
+  "AMD_US_EQ": 352.72,
   "NVDA_US_EQ": 211.34,
   "INTC_US_EQ": 97.15,
-  "AAPL_US_EQ": 270.94,
-  "GOOGL_US_EQ": 373.83,
+  "AAPL_US_EQ": 272.2,
+  "GOOGL_US_EQ": 384.74,
   "AMZN_US_EQ": 268.78,
-  "MSFT_US_EQ": 425.3
+  "MSFT_US_EQ": 425.3,
+  "KO_US_EQ": 78.82
 }

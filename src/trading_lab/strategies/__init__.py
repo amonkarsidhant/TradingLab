@@ -4,10 +4,14 @@ Strategy registry for Sid Trading Lab.
 Import all strategy modules here so Strategy.__subclasses__()
 can discover them.  list_strategies() and get_strategy() are the
 public API consumed by the CLI.
+
+NEW: @register_strategy decorator — lives in base.py to avoid circular imports.
 """
 from __future__ import annotations
 
-from trading_lab.strategies.base import Strategy
+from trading_lab.strategies.base import Strategy, StrategyMetadata
+
+# ── Hard-coded imports (legacy) ─────────────────────────────────────────────────
 from trading_lab.strategies.simple_momentum import SimpleMomentumStrategy
 from trading_lab.strategies.ma_crossover import MovingAverageCrossoverStrategy
 from trading_lab.strategies.mean_reversion import MeanReversionStrategy

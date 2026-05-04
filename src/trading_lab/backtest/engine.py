@@ -6,10 +6,12 @@ No network. No broker. No order placement.  Deterministic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from trading_lab.backtest.metrics import compute_metrics
 from trading_lab.models import Signal, SignalAction
+from trading_lab.round_trips import RoundTrip, RoundTripTracker
 from trading_lab.strategies.base import Strategy
 
 
@@ -77,6 +79,9 @@ class BacktestEngine:
         signals: list[Signal] = []
         trades: list[BacktestTrade] = []
         open_trade: BacktestTrade | None = None
+        tracker = RoundTripTracker(
+            str(Path("./round_trips.sqlite3"))
+        )
 
         # Find the minimum window size the strategy needs.
         # We determine this empirically: feed growing windows until the
@@ -128,6 +133,22 @@ class BacktestEngine:
                 trades.append(open_trade)
                 position = 0.0
                 open_trade = None
+                # -- Record to round-trip tracker ------------------------
+                if tracker is not None:
+                    trip = RoundTrip(
+                        ticker=ticker,
+                        position_id=f"{ticker}_{open_trade.entry_date}",
+                        entry_price=open_trade.entry_price,
+                        exit_price=exit_price,
+                        quantity=position,
+                        pnl=round(open_trade.pnl or 0, 2),
+                        pnl_pct=round(open_trade.return_pct or 0, 2),
+                        days_held=0,
+                        strategy=open_trade.entry_signal.strategy,
+                        entry_date=open_trade.entry_date,
+                        exit_date=date,
+                    )
+                    tracker.record(trip)
 
             # -- Mark-to-market equity ---------------------------------
             mtm = cash + (position * price)
