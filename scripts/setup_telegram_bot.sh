@@ -3,7 +3,7 @@
 
 set -e
 
-REPO="/Users/sidhantamonkar/Documents/Projects/sid-trading-lab"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PLIST_NAME="com.sidtradinglab.telegrambot.plist"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 

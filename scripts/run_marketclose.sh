@@ -1,10 +1,10 @@
 #!/bin/bash
-cd /Users/sidhantamonkar/Documents/Projects/sid-trading-lab || exit 1
+cd "$(dirname "$0")/.." || exit 1
 source .env
 export PYTHONPATH=src:$PYTHONPATH
 
 # Run end-of-day journal
-/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli daily-journal
+"$(pwd)/.venv/bin/python3" -m trading_lab.cli daily-journal
 
 # Notify
 curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \

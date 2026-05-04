@@ -2,7 +2,7 @@
 # Bull Discord Bot launcher
 set -euo pipefail
 
-PROJECT_DIR="/Users/sidhantamonkar/Documents/Projects/sid-trading-lab"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="${PROJECT_DIR}/.venv/bin/python"
 BOT="${PROJECT_DIR}/src/trading_lab/discord_bot.py"
 

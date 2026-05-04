@@ -1,12 +1,12 @@
 #!/bin/bash
-cd /Users/sidhantamonkar/Documents/Projects/sid-trading-lab || exit 1
+cd "$(dirname "$0")/.." || exit 1
 source .env
 export PYTHONPATH=src:$PYTHONPATH
 
 # Run weekly reports
-/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli weekly-report --date today
-/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli strategy-comparison --ticker SPY --data-source static
-/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli agent-reviews --week current
+"$(pwd)/.venv/bin/python3" -m trading_lab.cli weekly-report --date today
+"$(pwd)/.venv/bin/python3" -m trading_lab.cli strategy-comparison --ticker SPY --data-source static
+"$(pwd)/.venv/bin/python3" -m trading_lab.cli agent-reviews --week current
 
 # Notify
 curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \

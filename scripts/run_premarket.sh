@@ -1,10 +1,10 @@
 #!/bin/bash
-cd /Users/sidhantamonkar/Documents/Projects/sid-trading-lab || exit 1
+cd "$(dirname "$0")/.." || exit 1
 source .env
 export PYTHONPATH=src:$PYTHONPATH
 
 # Run pre-market scan
-/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli scan-rank
+"$(pwd)/.venv/bin/python3" -m trading_lab.cli scan-rank
 EXIT_CODE=$?
 
 # Notify via Telegram

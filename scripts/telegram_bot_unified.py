@@ -40,8 +40,8 @@ from telegram.ext import (
     ConversationHandler,
 )
 
-# ── Project paths ─────────────────────────────────────────────────────────────
-PROJECT_DIR = Path("/Users/sidhantamonkar/Documents/Projects/sid-trading-lab")
+# -- Project paths --
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 VENV_PYTHON = PROJECT_DIR / ".venv/bin/python3"
 LOGS_DIR = PROJECT_DIR / "logs"
 

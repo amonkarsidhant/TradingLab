@@ -8,7 +8,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>export PYTHONPATH=/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/src:$PYTHONPATH; cd /Users/sidhantamonkar/Documents/Projects/sid-trading-lab; /Users/sidhantamonkar/Documents/Projects/sid-trading-lab/.venv/bin/python3 -m trading_lab.cli scan-rank</string>
+        <string>export PYTHONPATH=$PROJECT_DIR/src:$PYTHONPATH; cd $PROJECT_DIR; $PROJECT_DIR/.venv/bin/python3 -m trading_lab.cli scan-rank</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
@@ -18,9 +18,9 @@
         <integer>0</integer>
     </dict>
     <key>StandardOutPath</key>
-    <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/logs/premarket.log</string>
+    <string>$PROJECT_DIR/logs/premarket.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/sidhantamonkar/Documents/Projects/sid-trading-lab/logs/premarket_error.log</string>
+    <string>$PROJECT_DIR/logs/premarket_error.log</string>
     <key>RunAtLoad</key>
     <true/>
 </dict>
