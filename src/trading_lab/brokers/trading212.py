@@ -15,6 +15,44 @@ from trading_lab.config import Settings
 logger = logging.getLogger(__name__)
 
 
+class T212APIError(Exception):
+    """Structured error from Trading 212 API calls.
+
+    Attributes:
+        status_code: HTTP status code (or None for network errors)
+        message: Human-readable description
+        retry_after: Seconds to wait before retry (if applicable)
+        payload: The request payload that caused the error (for 400/422 debugging)
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+        payload: dict | None = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+        self.retry_after = retry_after
+        self.payload = payload
+
+    def is_retryable(self) -> bool:
+        """True if the error is transient (rate limit, server error, timeout)."""
+        return self.status_code in (429, 502, 503, 504) or self.status_code is None
+
+    def __str__(self) -> str:
+        parts = [self.message]
+        if self.status_code:
+            parts.append(f"(HTTP {self.status_code})")
+        if self.retry_after:
+            parts.append(f"Retry after {self.retry_after:.0f}s")
+        if self.payload:
+            parts.append(f"Payload: {self.payload}")
+        return " | ".join(parts)
+
+
 def _t212_ticker_to_yf(ticker: str) -> str:
     """Convert T212 ticker (AAPL_US_EQ) to a yfinance symbol (AAPL).
 
@@ -411,16 +449,70 @@ class Trading212Client:
                 if attempt < self.MAX_RETRIES - 1:
                     time.sleep(sleep_time)
                     continue
+                # Final attempt hit rate limit — raise structured error
+                raise T212APIError(
+                    "T212 rate limit exceeded. Wait before retrying.",
+                    status_code=429,
+                    retry_after=sleep_time,
+                )
 
-            if response.status_code in (401, 403, 404, 422):
-                response.raise_for_status()
+            if response.status_code == 400:
+                body = response.text[:500] if response.text else "no body"
+                raise T212APIError(
+                    f"Bad request — check payload fields (quantity, ticker, order type). Response: {body}",
+                    status_code=400,
+                    payload=kwargs.get("json"),
+                )
 
+            if response.status_code == 401:
+                raise T212APIError(
+                    "Invalid T212 API credentials. Check T212_API_KEY / T212_API_SECRET.",
+                    status_code=401,
+                )
+
+            if response.status_code == 403:
+                raise T212APIError(
+                    "T212 API access forbidden. Ensure your account has API access enabled.",
+                    status_code=403,
+                )
+
+            if response.status_code == 404:
+                raise T212APIError(
+                    f"Endpoint not found: {path}. Check T212 API version.",
+                    status_code=404,
+                )
+
+            if response.status_code == 422:
+                body = response.text[:500] if response.text else "no body"
+                raise T212APIError(
+                    f"Unprocessable order — validation failed. Response: {body}",
+                    status_code=422,
+                    payload=kwargs.get("json"),
+                )
+
+            # 5xx or unexpected 4xx — treat as retryable on transient, fatal otherwise
+            if response.status_code and response.status_code >= 500:
+                last_error = response
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(self.RETRY_BACKOFF_BASE ** attempt)
+                    continue
+                raise T212APIError(
+                    f"T212 server error ({response.status_code}). Service may be degraded.",
+                    status_code=response.status_code,
+                )
+
+            # Catch-all for any other non-2xx status
             last_error = response
             if attempt < self.MAX_RETRIES - 1:
                 time.sleep(self.RETRY_BACKOFF_BASE ** attempt)
 
         if last_error is not None:
-            last_error.raise_for_status()
+            body = last_error.text[:500] if last_error.text else "no body"
+            raise T212APIError(
+                f"Request failed after {self.MAX_RETRIES} retries. Last response: {body}",
+                status_code=last_error.status_code,
+                payload=kwargs.get("json"),
+            )
         # Throttle alert on repeated API failures (go-trader port)
         should_notify, count = self._failure_throttle.record(endpoint_key, str(last_error))
         if should_notify:
@@ -428,7 +520,7 @@ class Trading212Client:
                 "%s",
                 self._failure_throttle.format_alert(endpoint_key, str(last_error), count),
             )
-        raise RuntimeError(f"Request failed after {self.MAX_RETRIES} retries")
+        raise T212APIError(f"Request failed after {self.MAX_RETRIES} retries")
 
     def _paginate(self, method: str, initial_path: str, **kwargs: Any) -> list[dict]:
         items: list[dict] = []

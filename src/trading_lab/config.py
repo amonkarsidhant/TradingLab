@@ -45,6 +45,7 @@ class Settings:
     max_concentration_pct: float = 60.0
     max_same_direction_pct: float = 75.0
     tiered_stops: tuple[dict[str, Any], ...] | None = None
+    earnings_block_missing: bool = False  # if True, skip trades when earnings data unavailable
 
     @property
     def base_url(self) -> str:
@@ -100,6 +101,7 @@ def get_settings() -> Settings:
         max_concentration_pct=float(os.getenv("MAX_CONCENTRATION_PCT", "60.0")),
         max_same_direction_pct=float(os.getenv("MAX_SAME_DIRECTION_PCT", "75.0")),
         tiered_stops=None,
+        earnings_block_missing=_as_bool(os.getenv("EARNINGS_BLOCK_MISSING"), False),
     )
     return _migrate_config(settings)
 

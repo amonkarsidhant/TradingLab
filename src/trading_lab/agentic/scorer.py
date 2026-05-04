@@ -16,7 +16,10 @@ class EntryScorer:
     - Profit factor (0-25)
     - Parameter stability CV (0-25)
     - Outperformance vs buy-and-hold (0-25)
+    - Market-cap quality gate (penalty for sub-$5B)
     """
+
+    MIN_MARKET_CAP = 5_000_000_000  # $5B minimum for full score
 
     def score(self, strategy_name: str, ticker: str, capital: float = 10_000.0) -> dict:
         engine = FactsheetEngine(strategy_name, ticker, capital)
@@ -44,10 +47,17 @@ class EntryScorer:
 
         total = round(sharpe_score + pf_score + stab_score + outp_score, 1)
 
+        # Market-cap quality gate
+        market_cap, cap_penalty = self._market_cap_penalty(ticker)
+        total_after_penalty = round(total * cap_penalty, 1)
+
         return {
             "strategy": strategy_name,
             "ticker": ticker,
-            "score": total,
+            "score": total_after_penalty,
+            "raw_score": total,
+            "market_cap": market_cap,
+            "market_cap_penalty": cap_penalty,
             "factors": {
                 "sharpe": {"raw": sharpe, "score": round(sharpe_score, 1)},
                 "profit_factor": {"raw": pf, "score": round(pf_score, 1)},
@@ -56,6 +66,24 @@ class EntryScorer:
             },
             "verdict": data["verdict"],
         }
+
+    def _market_cap_penalty(self, ticker: str) -> tuple[float | None, float]:
+        """Fetch market cap from yfinance. Returns (market_cap, penalty_multiplier).
+        Sub-$5B tickers get a 0.5x penalty. Sub-$1B get 0.2x.
+        """
+        import yfinance as yf
+        try:
+            info = yf.Ticker(ticker).info
+            cap = info.get("marketCap")
+            if cap is None:
+                return None, 1.0
+            if cap >= self.MIN_MARKET_CAP:
+                return cap, 1.0
+            if cap >= 1_000_000_000:
+                return cap, 0.5
+            return cap, 0.2
+        except Exception:
+            return None, 1.0
 
     def rank(
         self,

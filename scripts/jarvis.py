@@ -348,24 +348,83 @@ def main():
         print("--- No BUY candidates or no capacity ---")
     print()
 
-    # 5. Final state
+    # 5. Final state + structured report
     state = pm.state()
     print("=" * 60)
     print("DAILY REPORT")
     print("=" * 60)
-    print(f"Cash: €{state.cash:,.2f}")
-    print(f"Total Value: €{state.total_value:,.2f}")
-    print(f"Invested: €{state.invested_value:,.2f}")
-    print(f"Unrealized P&L: €{state.unrealized_pnl:,.2f}")
-    print(f"Open Positions: {len(state.positions)}")
+
+    # 5a. Portfolio Summary
+    print(f"\n[ Portfolio Summary ]")
+    print(f"  Cash:            €{state.cash:,.2f}")
+    print(f"  Invested:        €{state.invested_value:,.2f}")
+    print(f"  Total Value:     €{state.total_value:,.2f}")
+    print(f"  Unrealized P&L:  €{state.unrealized_pnl:,.2f}")
+    print(f"  Positions:       {len(state.positions)}/10")
+    if regime:
+        print(f"  Regime:          {regime.regime} (trailing stop {regime.trailing_stop_pct:.1%})")
     print()
-    print(f"Orders SOLD: {len(sell_orders)}")
-    for t, r in sell_orders:
-        print(f"  SOLD {t}")
-    print(f"Orders BOUGHT: {len(buy_orders)}")
-    for t, q, r in buy_orders:
-        print(f"  BOUGHT {q} {t}")
+
+    # 5b. Open Positions grouped by P&L direction
+    if state.positions:
+        gainers = [p for p in state.positions if p.unrealized_pnl >= 0]
+        losers = [p for p in state.positions if p.unrealized_pnl < 0]
+        print(f"[ Open Positions — {len(state.positions)} total ]")
+        if gainers:
+            print(f"  Gainers ({len(gainers)}):")
+            for p in sorted(gainers, key=lambda x: x.unrealized_pnl, reverse=True):
+                pct = (p.current_price - p.avg_price) / p.avg_price if p.avg_price else 0
+                print(f"    + {p.ticker}: €{p.unrealized_pnl:+.2f} ({pct:+.1%}) @ €{p.current_price:.2f}")
+        if losers:
+            print(f"  Losers  ({len(losers)}):")
+            for p in sorted(losers, key=lambda x: x.unrealized_pnl):
+                pct = (p.current_price - p.avg_price) / p.avg_price if p.avg_price else 0
+                print(f"    - {p.ticker}: €{p.unrealized_pnl:+.2f} ({pct:+.1%}) @ €{p.current_price:.2f}  peak €{p.peak_price:.2f}")
+        print()
+
+    # 5c. Activity today
+    print(f"[ Activity Today ]")
+    if sell_orders:
+        print(f"  SOLD ({len(sell_orders)}):")
+        for t, r in sell_orders:
+            status = "✓" if r and not getattr(r, "error", None) else "✗"
+            print(f"    {status} {t}")
+    else:
+        print("  SOLD:  none")
+    if buy_orders:
+        print(f"  BOUGHT ({len(buy_orders)}):")
+        for t, q, r in buy_orders:
+            status = "✓" if r and not getattr(r, "error", None) else "✗"
+            cap_note = ""
+            if isinstance(r, dict) and r.get("market_cap"):
+                cap = r["market_cap"]
+                if cap >= 200_000_000_000:
+                    cap_note = " [mega-cap]"
+                elif cap >= 10_000_000_000:
+                    cap_note = " [large-cap]"
+                elif cap < 5_000_000_000:
+                    cap_note = " [small-cap ⚠️]"
+            print(f"    {status} {q} {t}{cap_note}")
+    else:
+        print("  BOUGHT: none")
     print()
+
+    # 5d. Risk flags
+    risk_flags = []
+    if state.cash / state.total_value < 0.10:
+        risk_flags.append("Cash reserve below 10%")
+    if len(state.positions) >= 10:
+        risk_flags.append("Position limit reached")
+    for p in state.positions:
+        dd = pm.position_drawdown(p)
+        if dd <= -0.05:
+            risk_flags.append(f"{p.ticker} down {dd:.1%} from peak")
+    if risk_flags:
+        print("[ Risk Flags ]")
+        for flag in risk_flags:
+            print(f"  ⚠️  {flag}")
+        print()
+
     print("Done. All demo trades logged to SQLite.")
 
 
