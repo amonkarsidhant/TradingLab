@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 from trading_lab.agentic.market_regime import MarketRegimeDetector
 from trading_lab.agentic.portfolio import PortfolioManager
-from trading_lab.agentic.scorer import SignalScorer
+from trading_lab.agentic.scorer import EntryScorer
 from trading_lab.config import get_settings
 from trading_lab.data.market_data import make_provider
 from trading_lab.models import SignalAction
@@ -63,7 +63,7 @@ def main():
     print()
 
     pm = PortfolioManager(settings)
-    scorer = SignalScorer()
+    scorer = EntryScorer()
     regime_detector = MarketRegimeDetector()
 
     # 0. Detect market regime from SPY
