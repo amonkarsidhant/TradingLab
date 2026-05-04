@@ -23,10 +23,7 @@ Safety:
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-import os
 import time
-
-import requests
 
 from trading_lab.agentic.market_regime import MarketRegimeDetector
 from trading_lab.agentic.portfolio import PortfolioManager
@@ -56,37 +53,40 @@ def _t212_to_yahoo(t212_ticker: str) -> str:
 
 def check_earnings(tickers: list[str], days_ahead: int = 7) -> dict[str, list[dict]]:
     """
-    Check upcoming earnings for a list of tickers via FMP free API.
+    Check upcoming earnings for a list of tickers via yfinance.
     Returns {ticker: [earnings_events]} for events within days_ahead.
-    No API key required for the earnings calendar endpoint (free tier).
+    No API key required.
     """
-    api_key = os.environ.get("FMP_API_KEY", "")
+    import yfinance as yf
+
     today = datetime.now(timezone.utc).date()
     end = today + timedelta(days=days_ahead)
-
-    # FMP earnings calendar endpoint (free, no key needed for basic data)
-    url = (
-        f"https://financialmodelingprep.com/api/v3/earning_calendar"
-        f"?from={today}&to={end}"
-        f"&apikey={api_key}"
-    )
-
     flagged: dict[str, list[dict]] = {}
-    try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        if not isinstance(data, list):
-            return flagged
 
-        # Normalize ticker lookup
-        lookup = {t.upper(): t for t in tickers}
-        for event in data:
-            sym = event.get("symbol", "").upper()
-            if sym in lookup:
-                flagged.setdefault(lookup[sym], []).append(event)
-    except Exception as exc:
-        print(f"  Earnings check skipped ({exc})")
+    for sym in tickers:
+        try:
+            tk = yf.Ticker(sym)
+            ed = tk.earnings_dates
+            if ed is None or ed.empty:
+                continue
+            # ed is a DataFrame with earnings dates as index
+            for idx, row in ed.iterrows():
+                try:
+                    # idx may be a Timestamp or string date
+                    if hasattr(idx, 'date'):
+                        d = idx.date()
+                    else:
+                        d = datetime.strptime(str(idx)[:10], "%Y-%m-%d").date()
+                except Exception:
+                    continue
+                if today <= d <= end:
+                    eps_est = row.get("EPS Estimate", "N/A")
+                    flagged.setdefault(sym, []).append({
+                        "date": str(d),
+                        "epsEstimated": eps_est,
+                    })
+        except Exception:
+            continue
 
     return flagged
 
