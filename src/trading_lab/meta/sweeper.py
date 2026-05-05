@@ -15,8 +15,8 @@ import numpy as np
 from trading_lab.backtest.engine import BacktestEngine
 from trading_lab.backtest.metrics import compute_metrics
 from trading_lab.data.market_data import make_provider
+from trading_lab.regime.detector import HistoricalRegimeDetector
 from trading_lab.registry.performance import StrategyPerformanceRegistry
-from trading_lab.regime.detector import RegimeDetector
 from trading_lab.strategies import get_strategy, list_strategies
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,13 @@ class StrategySweeper:
         "SPY", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA",
         "AMD", "INTC", "CRM", "ADBE", "UNH", "JNJ", "V", "MA",
     ]
+    BREADTH_TICKERS = [
+        "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM",
+        "JNJ", "V", "PG", "UNH", "HD", "MA", "BAC", "ABBV", "PFE", "KO",
+        "PEP", "WMT", "MRK", "AVGO", "TMO", "COST", "DIS", "ABT", "ACN",
+        "DHR", "VZ", "NKE", "TXN", "ADBE", "CRM", "CMCSA", "XOM", "CVX",
+        "LLY", "NFLX", "AMD", "QCOM", "HON", "INTC", "AMGN", "SPGI", "IBM",
+    ]
 
     # How many days a regime must persist to be considered stable
     MIN_REGIME_WINDOW_DAYS = 10
@@ -58,7 +65,6 @@ class StrategySweeper:
         self.tickers = tickers or self.DEFAULT_TICKERS
         self.lookback_days = lookback_days
         self.warmup_days = warmup_days
-        self.detector = RegimeDetector()
 
     # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -78,8 +84,23 @@ class StrategySweeper:
             logger.warning("No strategies registered. Nothing to sweep.")
             return []
 
-        # First: detect regime windows from SPY history for the lookback period
-        regime_windows = self._detect_regime_windows()
+        # Fetch ALL data once for full lookback period (historical regime detection)
+        logger.info("Fetching historical data for regime detection (lookback=%d)...", self.lookback_days)
+        hist_data = self._fetch_all_data(self.lookback_days + self.warmup_days)
+
+        if not hist_data:
+            logger.warning("Could not fetch historical data for sweeper")
+            return []
+
+        spy_prices = hist_data.get("SPY", [])
+        if len(spy_prices) < self.lookback_days:
+            logger.warning(
+                "Not enough SPY data (%d bars, need %d)", len(spy_prices), self.lookback_days
+            )
+            return []
+
+        # Detect regime windows from historical data
+        regime_windows = self._detect_regime_windows(hist_data)
 
         logger.info(
             "Sweeping %d strategies across %d regime windows on %d tickers",
@@ -88,7 +109,9 @@ class StrategySweeper:
 
         for strategy_id in strategies:
             for window in regime_windows:
-                result = self._sweep_strategy_in_window(strategy_id, window)
+                result = self._sweep_strategy_in_window(
+                    strategy_id, window, hist_data
+                )
                 if result:
                     all_results.append(result)
 
@@ -99,79 +122,112 @@ class StrategySweeper:
 
     # ── Internal ─────────────────────────────────────────────────────────────────
 
-    def _detect_regime_windows(self) -> list[dict]:
-        """Detect contiguous regime windows from SPY history over lookback_days."""
-        provider = make_provider(source="yfinance", ticker="SPY")
-        prices_data = provider.get_prices(ticker="SPY", lookback=self.lookback_days + self.warmup_days)
+    def _fetch_all_data(
+        self, lookback: int,
+    ) -> dict[str, list[float]]:
+        """Fetch all tickers once — avoids N× repeated yfinance requests."""
+        all_tickers = list(set(self.tickers + ["SPY", "VIXY", "XLY", "XLP"] + self.BREADTH_TICKERS))
+        data: dict[str, list[float]] = {}
 
-        if not prices_data or not hasattr(prices_data, "values"):
-            logger.warning("Could not fetch SPY prices for regime window detection")
+        for ticker in all_tickers:
+            try:
+                provider = make_provider(source="yfinance", ticker=ticker)
+                prices = provider.get_prices(ticker=ticker, lookback=lookback)
+                if prices:
+                    data[ticker] = prices
+            except Exception as exc:
+                logger.debug("Fetch skip %s: %s", ticker, exc)
+                continue
+
+        return data
+
+    def _detect_regime_windows(
+        self,
+        data: dict[str, list[float]],
+    ) -> list[dict]:
+        """Detect contiguous regime windows from historical data arrays."""
+        det = HistoricalRegimeDetector()
+
+        spy_closes = data.get("SPY", [])
+        n = len(spy_closes)
+
+        if n < self.lookback_days:
             return []
 
-        closes = prices_data["Close"].values if hasattr(prices_data, "values") else prices_data
-        dates = (
-            prices_data.index.strftime("%Y-%m-%d").tolist()
-            if hasattr(prices_data, "index")
-            else [str(i) for i in range(len(closes))]
-        )
+        # Build per-day regime labels
+        dates = [str(i) for i in range(n)]
+        regimes: list[str] = []
 
-        if len(closes) < self.lookback_days:
-            logger.warning("Not enough SPY history for regime windows")
-            return []
+        for i in range(self.warmup_days, n):
+            # Prepare data up to day i
+            spy_slice = spy_closes[: i + 1]
+            vixy_slice = data.get("VIXY", spy_closes[: i + 1])[: i + 1]
+            xly_slice = data.get("XLY", spy_closes[: i + 1])[: i + 1]
+            xlp_slice = data.get("XLP", spy_closes[: i + 1])[: i + 1]
 
+            # Breadth data: slice per ticker to day i
+            bread: dict[str, list[float]] = {}
+            for sym in self.BREADTH_TICKERS:
+                if sym in data:
+                    bread[sym] = data[sym][: i + 1]
+
+            try:
+                state = det.detect_from_data(
+                    spy_closes=spy_slice,
+                    vixy_closes=vixy_slice,
+                    xly_closes=xly_slice,
+                    xlp_closes=xlp_slice,
+                    breadth_data=bread,
+                )
+                regimes.append(state.regime.value)
+            except Exception:
+                regimes.append("neutral")
+
+        # Detect contiguous windows
         windows: list[dict] = []
         current_regime = None
         window_start = None
         window_start_idx = None
 
-        for i in range(self.warmup_days, len(closes)):
-            window = closes[: i + 1]
-            signal = self.detector.detect()
-            regime = signal.regime.value
-
+        for i, regime in enumerate(regimes):
+            idx = i + self.warmup_days  # actual index in full array
             if regime != current_regime:
-                # Close previous window
                 if current_regime and window_start_idx is not None:
-                    window_len = i - window_start_idx
+                    window_len = idx - window_start_idx
                     if window_len >= self.MIN_REGIME_WINDOW_DAYS:
                         windows.append({
                             "regime": current_regime,
-                            "start": window_start,
-                            "end": dates[i - 1],
                             "start_idx": window_start_idx,
-                            "end_idx": i - 1,
+                            "end_idx": idx - 1,
                             "length": window_len,
+                            "start": dates[window_start_idx],
+                            "end": dates[idx - 1],
                         })
-                        logger.info(
-                            "Regime window: %s [%s → %s] (%d days)",
-                            current_regime, window_start, dates[i - 1], window_len,
-                        )
                 current_regime = regime
-                window_start = dates[i]
-                window_start_idx = i
+                window_start_idx = idx
 
         # Close last window
         if current_regime and window_start_idx is not None:
-            window_len = len(closes) - window_start_idx
+            window_len = n - window_start_idx
             if window_len >= self.MIN_REGIME_WINDOW_DAYS:
                 windows.append({
                     "regime": current_regime,
-                    "start": window_start,
-                    "end": dates[-1],
                     "start_idx": window_start_idx,
-                    "end_idx": len(closes) - 1,
+                    "end_idx": n - 1,
                     "length": window_len,
+                    "start": dates[window_start_idx],
+                    "end": dates[n - 1],
                 })
 
         if not windows:
-            # Fallback: just use the last 30 days as a single window
+            # Fallback: entire period as one window
             windows.append({
                 "regime": "neutral",
-                "start": dates[-self.lookback_days] if len(dates) >= self.lookback_days else dates[0],
-                "end": dates[-1],
-                "start_idx": max(0, len(closes) - self.lookback_days),
-                "end_idx": len(closes) - 1,
-                "length": min(self.lookback_days, len(closes)),
+                "start_idx": n - self.lookback_days,
+                "end_idx": n - 1,
+                "length": self.lookback_days,
+                "start": dates[n - self.lookback_days],
+                "end": dates[n - 1],
             })
 
         return windows
@@ -180,31 +236,26 @@ class StrategySweeper:
         self,
         strategy_id: str,
         window: dict,
+        data: dict[str, list[float]],
     ) -> SweepResult | None:
         """Backtest a single strategy within a single regime window across all tickers."""
         results_per_ticker: list[dict] = []
 
         for ticker in self.tickers:
             try:
-                # Fetch prices for this regime window
-                provider = make_provider(source="yfinance", ticker=ticker)
-                prices_data = provider.get_prices(ticker=ticker, lookback=window["length"] + 5)
+                closes = data.get(ticker, [])
+                # Slice to actual window boundaries
+                start = max(0, window["start_idx"])
+                end = min(len(closes), window["end_idx"] + 1)
+                window_closes = closes[start:end]
+                tick_dates = [str(i) for i in range(len(window_closes))]
 
-                if prices_data is None:
-                    continue
-                closes = prices_data["Close"].values if hasattr(prices_data, "values") else prices_data
-                tick_dates = (
-                    prices_data.index.strftime("%Y-%m-%d").tolist()
-                    if hasattr(prices_data, "index")
-                    else [str(i) for i in range(len(closes))]
-                )
-
-                if len(closes) < 20:
+                if len(window_closes) < 20:
                     continue
 
                 strategy = get_strategy(strategy_id)
                 engine = BacktestEngine(strategy, initial_capital=10_000.0)
-                result = engine.run(prices=closes, dates=tick_dates, ticker=ticker)
+                result = engine.run(prices=window_closes, dates=tick_dates, ticker=ticker)
 
                 results_per_ticker.append({
                     "ticker": ticker,
@@ -220,24 +271,19 @@ class StrategySweeper:
             return None
 
         # Aggregate across tickers
-        combined_trades = []
-        for r in results_per_ticker:
-            combined_trades.extend(r["trades"])
+        wins = sum(
+            1 for r in results_per_ticker
+            for t in r["trades"] if getattr(t, "pnl", 0) > 0
+        )
+        total_trades = sum(len(r["trades"]) for r in results_per_ticker)
+        win_rate = wins / total_trades if total_trades > 0 else 0.0
 
-        # Build a pseudo equity curve for combined metrics
-        # (Simple average of returns per ticker, normalized)
         ticker_returns = [
             r["metrics"]["total_return_pct"] / 100
             for r in results_per_ticker
             if r["metrics"].get("total_return_pct") is not None
         ]
 
-        # Win-rate across all tickers
-        wins = sum(1 for r in results_per_ticker for t in r["trades"] if getattr(t, "pnl", 0) > 0)
-        total_trades = sum(len(r["trades"]) for r in results_per_ticker)
-        win_rate = wins / total_trades if total_trades > 0 else 0.0
-
-        # Pseudo-sharpe: use cross-ticker returns
         if len(ticker_returns) >= 2:
             mean_ret = sum(ticker_returns) / len(ticker_returns)
             var = sum((r - mean_ret) ** 2 for r in ticker_returns) / (len(ticker_returns) - 1)
@@ -246,26 +292,18 @@ class StrategySweeper:
         else:
             sharpe = 0.0
 
-        # Max drawdown: worst single-ticker
         max_dd = max(
             (r["metrics"].get("max_drawdown_pct") or 0)
             for r in results_per_ticker
             if r["metrics"].get("max_drawdown_pct") is not None
         ) if results_per_ticker else 0.0
 
-        # Profit factor
         total_pf = [
             r["metrics"].get("profit_factor")
             for r in results_per_ticker
             if r["metrics"].get("profit_factor") is not None
         ]
         avg_pf = sum(total_pf) / len(total_pf) if total_pf else None
-
-        # Average hold days
-        hold_days = [
-            r["length"] for r in results_per_ticker if "length" in r
-        ]  # Not directly available; use window length as proxy
-        avg_hold = window["length"]  # simplified proxy
 
         return SweepResult(
             strategy_id=strategy_id,
@@ -282,14 +320,13 @@ class StrategySweeper:
             max_drawdown_pct=round(max_dd, 2),
             profit_factor=round(avg_pf, 2) if avg_pf else None,
             total_trades=total_trades,
-            avg_hold_days=avg_hold,
+            avg_hold_days=window["length"],
         )
 
     def _save_to_registry(self, results: list[SweepResult]) -> None:
         """Write sweep results to strategy_regime_performance."""
         registry = StrategyPerformanceRegistry()
 
-        # Group by strategy_id + regime
         grouped: dict[tuple[str, str], list[SweepResult]] = {}
         for r in results:
             key = (r.strategy_id, r.regime)

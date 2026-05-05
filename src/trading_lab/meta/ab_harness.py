@@ -61,6 +61,7 @@ class ABHarness:
         variant_name: str,
         tickers: list[str] | None = None,
         lookback_days: int = 126,
+        persist: bool = True,
     ) -> list[ABResult]:
         """Run A/B comparison across tickers, returning one ABResult per ticker."""
         tickers = tickers or ["SPY", "AAPL", "MSFT", "GOOGL", "AMZN"]
@@ -70,8 +71,30 @@ class ABHarness:
             result = self._compare_one(baseline_name, variant_name, ticker, lookback_days)
             if result:
                 results.append(result)
+                if persist:
+                    self._persist(result)
 
         return results
+
+    def _persist(self, result: ABResult) -> None:
+        """Save A/B result to SQLite ab_results table."""
+        from trading_lab.registry.performance import StrategyPerformanceRegistry
+        registry = StrategyPerformanceRegistry()
+        registry.save_ab_result(
+            baseline=result.baseline_name,
+            variant=result.variant_name,
+            ticker=result.ticker,
+            baseline_trades=result.baseline_trades,
+            variant_trades=result.variant_trades,
+            sharpe_diff=result.sharpe_diff,
+            win_rate_diff=result.win_rate_diff,
+            t_stat=result.t_stat,
+            p_value=result.p_value,
+            verdict=result.verdict,
+            reason=result.reason,
+            adopted=result.verdict == "pass",
+        )
+        logger.info("Persisted A/B result: %s vs %s on %s → %s", result.baseline_name, result.variant_name, result.ticker, result.verdict)
 
     def _compare_one(
         self,

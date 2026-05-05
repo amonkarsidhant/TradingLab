@@ -245,3 +245,87 @@ class RegimeDetector:
 def detect_regime() -> dict:
     """Convenience wrapper for CLI / tests."""
     return RegimeDetector().detect().to_dict()
+
+
+class HistoricalRegimeDetector:
+    """Detect regime from historical OHLCV data downloaded once.
+
+    Used by sweeper.py and seed_registry.py to label past regime windows
+    without live-fetching on every call.
+    """
+
+    def __init__(self, breadth_tickers: Optional[list[str]] = None) -> None:
+        self._breadth_tickers = breadth_tickers or RegimeDetector()._breadth_tickers
+
+    def detect_from_data(
+        self,
+        spy_closes: list[float],
+        vixy_closes: list[float],
+        xly_closes: list[float],
+        xlp_closes: list[float],
+        breadth_data: dict[str, list[float]] | None = None,
+    ) -> RegimeState:
+        """Compute regime from pre-downloaded historical data arrays.
+
+        Args:
+            spy_closes: SPY closing prices (oldest first)
+            vixy_closes: VIXY closing prices (oldest first)
+            xly_closes: XLY closing prices (oldest first)
+            xlp_closes: XLP closing prices (oldest first)
+            breadth_data: dict mapping ticker -> list of closes (oldest first)
+
+        All arrays must be aligned to the same trading-day index.
+        """
+        from datetime import datetime, timezone
+        arr_spy = np.array(spy_closes, dtype=float)
+        arr_vixy = np.array(vixy_closes, dtype=float)
+
+        vix_proxy = float(arr_vixy[-1]) if len(arr_vixy) > 0 else 15.0
+        sector_rotation = self._sector_rotation(xly_closes, xlp_closes)
+        trend_score = self._spy_trend(arr_spy)
+        breadth_pct = self._breadth_from_data(breadth_data) if breadth_data else 0.5
+
+        regime, confidence = RegimeDetector()._classify(
+            vix_proxy, breadth_pct, sector_rotation, trend_score
+        )
+
+        return RegimeState(
+            regime=regime,
+            vix_proxy=vix_proxy,
+            breadth_pct=breadth_pct,
+            sector_rotation=sector_rotation,
+            trend_score=trend_score,
+            confidence=confidence,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
+    @staticmethod
+    def _sector_rotation(xly: list[float], xlp: list[float]) -> float:
+        if not xly or not xlp or xlp[-1] == 0:
+            return 1.0
+        return float(xly[-1]) / float(xlp[-1])
+
+    @staticmethod
+    def _spy_trend(closes: np.ndarray) -> float:
+        if len(closes) < 50:
+            return 0.0
+        ema20 = RegimeDetector._ema(closes, 20)
+        sma50 = RegimeDetector._sma(closes, 50)
+        if sma50 == 0:
+            return 0.0
+        return float(
+            (closes[-1] - ema20) / ema20 - (closes[-1] - sma50) / sma50
+        )
+
+    def _breadth_from_data(self, data: dict[str, list[float]]) -> float:
+        above = 0
+        total = 0
+        for sym, prices in data.items():
+            if len(prices) < 50:
+                continue
+            arr = np.array(prices[-50:], dtype=float)
+            ma50 = arr.mean()
+            if arr[-1] > ma50:
+                above += 1
+            total += 1
+        return above / total if total > 0 else 0.5

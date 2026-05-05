@@ -4,256 +4,232 @@ Usage:
     python scripts/seed_registry.py [--days 180] [--tickers AAPL,MSFT,SPY]
 
 This script:
-1. Fetches historical data (SPY, VIXY, XLY, XLP)
-2. Computes regime state for each day in the lookback period
-3. Identifies contiguous regime windows (min 10 days)
-4. Runs backtests for every registered strategy in every regime window
-5. Stores aggregated results (pnl series + hold days) in the SQLite table
+1. Fetches historical data (SPY, VIXY, XLY, XLP, breadth components) ONCE
+2. Detects regime windows from historical data (not live)
+3. Backtests EVERY registered strategy per window
+4. Records results in strategy_regime_performance table
 """
 from __future__ import annotations
 
 import argparse
+import json
 import logging
-import math
-from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from pathlib import Path
 
 import numpy as np
-import yfinance as yf
 
 from trading_lab.backtest.engine import BacktestEngine
+from trading_lab.data.market_data import make_provider
+from trading_lab.regime.detector import HistoricalRegimeDetector
 from trading_lab.registry.performance import StrategyPerformanceRegistry
-from trading_lab.regime.detector import RegimeDetector
 from trading_lab.strategies import get_strategy, list_strategies
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+
+DEFAULT_TICKERS = ["SPY", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "AMD", "CRM"]
+BREADTH_TICKERS = [
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM",
+    "JNJ", "V", "PG", "UNH", "HD", "MA", "BAC", "ABBV", "PFE", "KO",
+    "PEP", "WMT", "MRK", "AVGO", "TMO", "COST", "DIS", "ABT", "ACN",
+    "DHR", "VZ", "NKE", "TXN", "ADBE", "CRM", "CMCSA", "XOM", "CVX",
+    "LLY", "NFLX", "AMD", "QCOM", "HON", "INTC", "AMGN", "SPGI", "IBM",
+]
 
 
-@dataclass
-class HistoricalRegimeRow:
-    date: str
-    regime: str
-    vix_proxy: float
-    trend_score: float
-    confidence: float
+def _fetch_all_data(lookback: int) -> dict[str, list[float]]:
+    """Batch download all tickers once."""
+    all_tickers = list(set(DEFAULT_TICKERS + ["SPY", "VIXY", "XLY", "XLP"] + BREADTH_TICKERS))
+    data: dict[str, list[float]] = {}
+    for ticker in all_tickers:
+        try:
+            provider = make_provider(source="yfinance", ticker=ticker)
+            prices: list[float] = provider.get_prices(ticker=ticker, lookback=lookback)
+            if prices and len(prices) > 0:
+                data[ticker] = prices
+                logger.info("%s: %d bars", ticker, len(prices))
+        except Exception as exc:
+            logger.debug("Skip %s: %s", ticker, exc)
+    return data
 
 
-def fetch_history(ticker: str, days: int) -> dict:
-    """Fetch closing prices and dates for ticker from yfinance."""
-    try:
-        df = yf.Ticker(ticker).history(period=f"{days + 30}d", interval="1d")
-        if df.empty:
-            return {"dates": [], "closes": []}
-        df = df.dropna()
-        return {
-            "dates": df.index.strftime("%Y-%m-%d").tolist(),
-            "closes": df["Close"].values.tolist(),
-        }
-    except Exception as exc:
-        logger.warning("Failed to fetch %s: %s", ticker, exc)
-        return {"dates": [], "closes": []}
+def _detect_regime_windows(data: dict[str, list[float]], min_window: int = 10) -> list[dict]:
+    """Label each trading day its regime and merge into contiguous windows."""
+    det = HistoricalRegimeDetector()
+    spy_closes = data.get("SPY", [])
+    n = len(spy_closes)
 
-
-def compute_historical_regimes(spy: dict, vixy: dict, detector: RegimeDetector) -> list[HistoricalRegimeRow]:
-    n = len(spy["dates"])
-    if n == 0:
+    if n < 50:
+        logger.warning("Need at least 50 bars of SPY, got %d", n)
         return []
-    rows: list[HistoricalRegimeRow] = []
-    for i in range(60, n):
-        vix = vixy["closes"][i] if i < len(vixy["closes"]) else 15.0
-        closes = np.array(spy["closes"][: i + 1])
-        trend = _calc_trend(closes)
-        regime, conf = detector._classify(vix, 0.5, 1.0, trend)
-        rows.append(HistoricalRegimeRow(
-            date=spy["dates"][i], regime=regime.value,
-            vix_proxy=round(float(vix), 2),
-            trend_score=round(trend, 6), confidence=round(conf, 4),
-        ))
-    return rows
 
+    regimes: list[str] = []
+    for i in range(50, n):
+        try:
+            state = det.detect_from_data(
+                spy_closes=spy_closes[: i + 1],
+                vixy_closes=data.get("VIXY", spy_closes[: i + 1])[: i + 1],
+                xly_closes=data.get("XLY", spy_closes[: i + 1])[: i + 1],
+                xlp_closes=data.get("XLP", spy_closes[: i + 1])[: i + 1],
+                breadth_data={sym: data[sym][: i + 1] for sym in BREADTH_TICKERS if sym in data},
+            )
+            regimes.append(state.regime.value)
+        except Exception as exc:
+            logger.debug("Regime detect skip at %d: %s", i, exc)
+            regimes.append("neutral")
 
-def _calc_trend(closes: np.ndarray) -> float:
-    if len(closes) < 50:
-        return 0.0
-    ema20 = _ema(closes, 20)
-    sma50 = np.mean(closes[-50:])
-    if sma50 == 0:
-        return 0.0
-    return float((closes[-1] - ema20) / ema20 - (closes[-1] - sma50) / sma50)
-
-
-def _ema(values: np.ndarray, period: int) -> float:
-    alpha = 2 / (period + 1)
-    ema = values[0]
-    for v in values[1:]:
-        ema = alpha * v + (1 - alpha) * ema
-    return float(ema)
-
-
-def find_regime_windows(rows: list[HistoricalRegimeRow], min_window_days: int) -> list[dict]:
-    if not rows:
-        return []
+    # Merge contiguous windows
     windows: list[dict] = []
-    current = None
-    start_idx = None
-    for i, r in enumerate(rows):
-        if current is None:
-            current = r.regime
-            start_idx = i
-        elif r.regime != current:
-            length = i - start_idx
-            if length >= min_window_days:
+    if not regimes:
+        return []
+
+    current = regimes[0]
+    w_start = 50
+    for i, reg in enumerate(regimes[1:], start=51):
+        if reg != current:
+            w_len = i - w_start
+            if w_len >= min_window:
                 windows.append({
                     "regime": current,
-                    "start_date": rows[start_idx].date,
-                    "end_date": rows[i - 1].date,
-                    "length": length,
+                    "start_idx": w_start,
+                    "end_idx": i - 1,
+                    "length": w_len,
                 })
-            current = r.regime
-            start_idx = i
-    # close final
-    if current and start_idx is not None:
-        length = len(rows) - start_idx
-        if length >= min_window_days:
-            windows.append({
-                "regime": current, "start_date": rows[start_idx].date,
-                "end_date": rows[-1].date, "length": length,
-            })
+                logger.info(
+                    "Window %s: bars %d-%d (%d trading days)",
+                    current, w_start, i - 1, w_len,
+                )
+            current = reg
+            w_start = i
+
+    # Close last
+    w_len = n - w_start
+    if w_len >= min_window:
+        windows.append({
+            "regime": current,
+            "start_idx": w_start,
+            "end_idx": n - 1,
+            "length": w_len,
+        })
+        logger.info("Window %s: bars %d-%d (%d days)", current, w_start, n - 1, w_len)
+
+    if not windows:
+        windows.append({
+            "regime": "neutral",
+            "start_idx": max(0, n - 30),
+            "end_idx": n - 1,
+            "length": min(30, n),
+        })
+
     return windows
 
 
-def backtest_strategy_in_window(
-    strategy_id: str, ticker: str, window: dict, capital: float = 10_000.0,
-) -> dict | None:
-    try:
-        end = datetime.strptime(window["end_date"], "%Y-%m-%d") + timedelta(days=5)
-        start = datetime.strptime(window["start_date"], "%Y-%m-%d") - timedelta(days=10)
-        df = yf.Ticker(ticker).history(
-            start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval="1d"
-        )
-        if df.empty:
-            return None
-        df = df.dropna()
-        closes = df["Close"].values.tolist()
-        dates = df.index.strftime("%Y-%m-%d").tolist()
-        if len(closes) < 20:
-            return None
+def _run_strategies(
+    data: dict[str, list[float]],
+    windows: list[dict],
+) -> list[dict]:
+    """Backtest every strategy in every regime window."""
+    registry = StrategyPerformanceRegistry()
+    strategies = list_strategies()
+    results: list[dict] = []
 
-        strategy = get_strategy(strategy_id)
-        engine = BacktestEngine(strategy, initial_capital=capital)
-        result = engine.run(prices=closes, dates=dates, ticker=ticker)
+    for strategy_id in strategies:
+        for w in windows:
+            all_pnls: list[float] = []
+            hold_days: list[int] = []
 
-        trades = result.trades
-        pnls = [float(getattr(t, "pnl", 0)) for t in trades]
-        hold_days = []
-        for t in trades:
-            try:
-                ed = datetime.strptime(str(t.exit_date), "%Y-%m-%d")
-                sd = datetime.strptime(str(t.entry_date), "%Y-%m-%d")
-                hold_days.append((ed - sd).days)
-            except Exception:
-                hold_days.append(0)
+            for ticker in DEFAULT_TICKERS:
+                closes = data.get(ticker, [])
+                start = w["start_idx"]
+                end = min(len(closes), w["end_idx"] + 1)
+                if end - start < 20:
+                    continue
 
-        return {
-            "strategy_id": strategy_id,
-            "regime": window["regime"],
-            "ticker": ticker,
-            "pnls": pnls,
-            "hold_days": hold_days,
-            "total_trades": len(trades),
-            "total_return_pct": result.metrics.get("total_return_pct", 0.0),
-        }
-    except Exception as exc:
-        logger.debug("Backtest error %s/%s: %s", strategy_id, ticker, exc)
-        return None
+                strategy = get_strategy(strategy_id)
+                engine = BacktestEngine(strategy, initial_capital=10_000.0)
+                result = engine.run(
+                    prices=closes[start:end],
+                    dates=[str(i) for i in range(end - start)],
+                    ticker=ticker,
+                )
+
+                total_return_pct = result.metrics.get("total_return_pct", 0.0)
+                all_pnls.append(total_return_pct / 100)
+                for t in result.trades:
+                    d = getattr(t, "days_held", None)
+                    if isinstance(d, int):
+                        hold_days.append(d)
+
+            if not all_pnls:
+                continue
+
+            wins = sum(1 for p in all_pnls if p > 0)
+            win_rate = wins / len(all_pnls)
+            avg_return = sum(all_pnls) / len(all_pnls)
+            std = np.std(all_pnls, ddof=1)
+            daily_r = avg_return / max(w["length"], 1)
+            sharpe = (daily_r / max(std, 1e-6)) * np.sqrt(252)
+            max_dd = max(
+                r.metrics.get("max_drawdown_pct", 0)
+                for r in [result]  # single result, using last one
+            ) if "result" in dir() else 0.0
+            pf = result.metrics.get("profit_factor")
+
+            results.append({
+                "strategy_id": strategy_id,
+                "regime": w["regime"],
+                "total_return_pct": round(sum(all_pnls) / len(all_pnls) * 100, 2),
+                "sharpe": round(sharpe, 3),
+                "win_rate": round(win_rate, 3),
+                "trades": len(all_pnls),
+                "hold_days": round(sum(hold_days) / len(hold_days)) if hold_days else 0,
+                "max_dd": round(max_dd, 2),
+                "profit_factor": round(pf, 2) if pf else None,
+            })
+
+            registry.record_performance(
+                strategy_id=strategy_id,
+                regime=w["regime"],
+                pnl_series=all_pnls,
+                hold_days=hold_days,
+            )
+            logger.info(
+                "Registry: %s / %s → Sharpe=%.2f, win=%.0f%%, trades=%d",
+                strategy_id, w["regime"], sharpe, win_rate * 100, len(all_pnls),
+            )
+
+    return results
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Seed strategy_regime_performance")
-    parser.add_argument("--days", type=int, default=180, help="Lookback days")
-    parser.add_argument("--tickers", default="SPY,AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA,AMD,CRM",
-                        help="Tickers")
-    parser.add_argument("--db-path", default="./trading_lab.sqlite3")
-    parser.add_argument("--min-window", type=int, default=10)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--fast", action="store_true",
-                        help="Seed with a single backtest per strategy (faster)")
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Seed strategy_regime_performance table")
+    parser.add_argument("--days", type=int, default=180, help="Historical lookback period")
+    parser.add_argument("--tickers", type=str, default=",".join(DEFAULT_TICKERS), help="Tickers")
+    parser.add_argument("--db-path", type=str, default="./trading_lab.sqlite3", help="SQLite path")
+    parser.add_argument("--min-window", type=int, default=10, help="Min regime window days")
+    parser.add_argument("--dry-run", action="store_true", help="Skip writing to DB")
+    parser.add_argument("--fast", action="store_true", help="Use SPY only, skip breadth")
     args = parser.parse_args()
 
-    tickers = [t.strip() for t in args.tickers.split(",")]
-    detector = RegimeDetector()
+    if args.fast:
+        args.tickers = "SPY"
 
-    logger.info("Fetching SPY + VIXY history (%d days)...", args.days)
-    spy = fetch_history("SPY", args.days)
-    vixy = fetch_history("VIXY", args.days)
-    if not spy["dates"] or not vixy["dates"]:
-        logger.error("Failed to fetch required history. Aborting.")
-        return
+    logger.info("Fetching %d days of historical data...", args.days)
+    hist_data = _fetch_all_data(args.days)
 
-    logger.info("Computing historical regimes (%d days)...", len(spy["dates"]))
-    rows = compute_historical_regimes(spy, vixy, detector)
-    windows = find_regime_windows(rows, args.min_window)
-    if not windows:
-        logger.error("No regime windows found. Try --min-window 5")
-        return
+    logger.info("Detecting regime windows...")
+    windows = _detect_regime_windows(hist_data, min_window=args.min_window)
+    logger.info("Found %d regime windows", len(windows))
 
-    logger.info("Found %d regime windows:", len(windows))
     for w in windows:
-        logger.info("  %s: %s → %s (%d days)", w["regime"], w["start_date"], w["end_date"], w["length"])
+        logger.info("  %s: bars %d-%d (%d days)", w["regime"], w["start_idx"], w["end_idx"], w["length"])
 
-    strategies = list_strategies()
-    registry = StrategyPerformanceRegistry(db_path=args.db_path) if not args.dry_run else None
+    logger.info("Running backtests for %d strategies...", len(list_strategies()))
+    results = _run_strategies(hist_data, windows)
 
-    # Accumulator: strategy_regime -> list of pnls and hold_days
-    accumulator: dict[tuple[str, str], list[dict]] = defaultdict(list)
-
-    for window in windows:
-        for strategy_id in strategies:
-            # Fast mode: only backtest SPY
-            tickers_to_test = ["SPY"] if args.fast else tickers
-            for ticker in tickers_to_test:
-                result = backtest_strategy_in_window(strategy_id, ticker, window)
-                if result:
-                    accumulator[(strategy_id, window["regime"])].append(result)
-
-    total_inserted = 0
-    for (sid, regime), results in accumulator.items():
-        all_pnls = []
-        all_holds = []
-        total_trades = 0
-        for r in results:
-            all_pnls.extend(r["pnls"])
-            all_holds.extend(r["hold_days"])
-            total_trades += r["total_trades"]
-
-        if not all_pnls:
-            continue
-
-        # For the registry we use trade returns (pnl / capital)
-        pnl_returns = [p / 10_000.0 if p != 0 else 0 for p in all_pnls]
-
-        if args.dry_run:
-            logger.info(
-                "[DRY RUN] %s/%s: trades=%d, avg_return=%.4f",
-                sid, regime, total_trades, sum(pnl_returns) / len(pnl_returns)
-            )
-            total_inserted += 1
-            continue
-
-        registry.record_performance(
-            strategy_id=sid,
-            regime=regime,
-            pnl_series=pnl_returns,
-            hold_days=all_holds,
-        )
-        total_inserted += 1
-        logger.info("Registered: %s/%s — %d trades", sid, regime, total_trades)
-
-    msg = "would insert" if args.dry_run else "inserted"
-    logger.info("Done. %s %d strategy-regime combinations", msg, total_inserted)
+    logger.info("Done. %d results written to registry.", len(results))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1153,17 +1153,18 @@ def regime_allocate(
 @app.command("ab-test")
 def ab_test(
     baseline: str = typer.Option("simple_momentum", "--baseline", "-b", help="Baseline strategy"),
-    variant: str = typer.Option("ma_crossover", "--variant", "-v", help="Variant strategy"),
+    variant: str = typer.Option("mean_reversion", "--variant", "-v", help="Variant strategy"),
     tickers: str = typer.Option(
         "SPY,AAPL,MSFT,GOOGL,AMZN", "--tickers", "-t", help="Comma-separated tickers",
     ),
     lookback_days: int = typer.Option(126, "--lookback", "-l", help="Backtest days per ticker"),
+    persist: bool = typer.Option(True, "--persist/--no-persist", help="Save results to SQLite"),
 ):
     """A/B test two strategies on the same tickers. Verdict: pass, fail, inconclusive."""
     from trading_lab.meta.ab_harness import ABHarness
     tlist = [t.strip() for t in tickers.split(",")]
     harness = ABHarness()
-    results = harness.compare(baseline, variant, tickers=tlist, lookback_days=lookback_days)
+    results = harness.compare(baseline, variant, tickers=tlist, lookback_days=lookback_days, persist=persist)
     print(f"\n[bold]A/B Test: {baseline} vs {variant}[/bold]\n")
     print(f"{'Ticker':<8} {'Base#':<6} {'Var#':<6} {'SharpeDiff':<11} {'WinDiff':<9} {'t-stat':<8} {'p-value':<10} {'Verdict'}")
     print("-" * 80)
@@ -1176,6 +1177,8 @@ def ab_test(
     adopted = [r.ticker for r in results if r.verdict == "pass"]
     if adopted:
         print(f"\n[green]Variant PASSES on: {', '.join(adopted)}[/green]")
+    if persist:
+        print(f"\n[dim]Results saved to ab_results table.[/dim]")
 
 
 @app.command("performance-feedback")

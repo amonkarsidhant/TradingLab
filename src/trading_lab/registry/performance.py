@@ -69,6 +69,29 @@ class StrategyPerformanceRegistry:
                 """CREATE INDEX IF NOT EXISTS idx_cycles_timestamp
                     ON cycles(timestamp)"""
             )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS ab_results (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp       TEXT    NOT NULL,
+                    baseline        TEXT    NOT NULL,
+                    variant         TEXT    NOT NULL,
+                    ticker          TEXT    NOT NULL,
+                    baseline_trades INTEGER,
+                    variant_trades  INTEGER,
+                    sharpe_diff     REAL,
+                    win_rate_diff   REAL,
+                    t_stat          REAL,
+                    p_value         REAL,
+                    verdict         TEXT    NOT NULL,
+                    reason          TEXT,
+                    adopted         INTEGER DEFAULT 0,
+                    UNIQUE(baseline, variant, ticker, timestamp)
+                )"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS idx_ab_results_variant
+                    ON ab_results(baseline, variant)"""
+            )
 
     # ── Write ──────────────────────────────────────────────────────────────────
 
@@ -133,6 +156,59 @@ class StrategyPerformanceRegistry:
                 (timestamp, regime, confidence, strategy, signals_count, executed_count, pnl_after_cycle),
             )
 
+    def save_ab_result(
+        self,
+        *,
+        baseline: str,
+        variant: str,
+        ticker: str,
+        baseline_trades: int,
+        variant_trades: int,
+        sharpe_diff: float,
+        win_rate_diff: float,
+        t_stat: float | None,
+        p_value: float | None,
+        verdict: str,
+        reason: str,
+        adopted: bool = False,
+    ) -> None:
+        """Persist an A/B comparison result."""
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        with self._connection() as conn:
+            conn.execute(
+                """INSERT INTO ab_results
+                    (timestamp, baseline, variant, ticker, baseline_trades, variant_trades,
+                     sharpe_diff, win_rate_diff, t_stat, p_value, verdict, reason, adopted)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (ts, baseline, variant, ticker, baseline_trades, variant_trades,
+                 sharpe_diff, win_rate_diff, t_stat, p_value, verdict, reason, int(adopted)),
+            )
+
+    def get_ab_results(
+        self,
+        baseline: str = "",
+        variant: str = "",
+        adopted_only: bool = False,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Query persisted A/B results."""
+        with self._connection() as conn:
+            conn.row_factory = sqlite3.Row
+            conditions = ["1=1"]
+            params: list = []
+            if baseline:
+                conditions.append("baseline = ?")
+                params.append(baseline)
+            if variant:
+                conditions.append("variant = ?")
+                params.append(variant)
+            if adopted_only:
+                conditions.append("adopted = 1")
+            sql = f"SELECT * FROM ab_results WHERE {' AND '.join(conditions)} ORDER BY timestamp DESC LIMIT {limit}"
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows] if rows else []
+
     # ── Read ───────────────────────────────────────────────────────────────────
 
     def best_for_regime(self, regime: str, min_trades: int = 5) -> Optional[str]:
@@ -166,14 +242,15 @@ class StrategyPerformanceRegistry:
             ).fetchone()
             if not row:
                 return None
+            # row_factory is not set by default, use index access
             return StrategyRegimeRecord(
-                strategy_id=row["strategy_id"],
-                regime=row["regime"],
-                sharpe=row["sharpe"],
-                win_rate=row["win_rate"],
-                avg_hold_days=row["avg_hold_days"],
-                trade_count=row["trade_count"],
-                updated_at=row["updated_at"],
+                strategy_id=row[1],
+                regime=row[2],
+                sharpe=row[3],
+                win_rate=row[4],
+                avg_hold_days=row[5],
+                trade_count=row[6],
+                updated_at=row[7],
             )
 
     # ── Stats ────────────────────────────────────────────────────────────────────
