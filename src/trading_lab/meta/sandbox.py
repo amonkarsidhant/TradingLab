@@ -45,6 +45,7 @@ class SyntaxSandbox:
         "round", "set", "slice", "sorted", "str", "sum", "tuple",
         "zip", "True", "False", "None", "__import__", "__build_class__",
         "type", "object", "isinstance", "issubclass", "hasattr", "getattr",
+        "super", "print", "Exception", "ValueError", "TypeError",
     }
 
     ALLOWED_IMPORTS = {
