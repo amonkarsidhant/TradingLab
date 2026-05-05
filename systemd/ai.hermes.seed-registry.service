@@ -1,0 +1,14 @@
+[Unit]
+Description=Sid Trading Lab — Seed Registry (auto backtest seeding)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/sidhant/TradingLab
+Environment=PYTHONPATH=/home/sidhant/TradingLab/src
+ExecStart=/home/sidhant/TradingLab/.venv/bin/python3 /home/sidhant/TradingLab/scripts/seed_registry.py --days 180 --db-path /home/sidhant/TradingLab/trading_lab.sqlite3
+StandardOutput=append:/home/sidhant/TradingLab/logs/seed-registry.log
+StandardError=append:/home/sidhant/TradingLab/logs/seed-registry.err
+
+[Install]
+WantedBy=multi-user.target
