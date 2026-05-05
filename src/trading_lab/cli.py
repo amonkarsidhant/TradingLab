@@ -1411,6 +1411,196 @@ def performance_feedback(
         print(f"[green]Report written to {path}[/green]")
 
 
+# ── Phase 3 Commands ──────────────────────────────────────────────────────────
+
+@app.command("discover-alpha")
+def discover_alpha(
+    strategy: str = typer.Option("simple_momentum", "--strategy", "-s", help="Base strategy to improve"),
+    limit: int = typer.Option(3, "--limit", "-n", help="Max hypotheses"),
+):
+    """LLM-driven alpha hypothesis discovery."""
+    from trading_lab.alpha.discovery import AlphaDiscoveryEngine
+    engine = AlphaDiscoveryEngine()
+    hypotheses = engine.discover(strategy_id=strategy, limit=limit)
+    if not hypotheses:
+        print("[yellow]No hypotheses discovered. Check LLM provider config.[/yellow]")
+        return
+    print(f"\n[bold]Alpha Hypotheses for {strategy}[/bold]\n")
+    for i, h in enumerate(hypotheses, 1):
+        print(f"{i}. [cyan]{h.feature_name}[/cyan] (confidence: {h.confidence:.0%})")
+        print(f"   Regime: {h.target_regime}")
+        print(f"   Formula: {h.suggested_formula}")
+        print(f"   {h.description}")
+        print()
+
+
+@app.command("engineer-features")
+def engineer_features(
+    tickers: str = typer.Option("SPY", "--tickers", "-t", help="Comma-separated tickers"),
+    days: int = typer.Option(30, "--days", "-d", help="Lookback days"),
+    custom: str = typer.Option("", "--custom", "-c", help="Custom formula: name=formula"),
+):
+    """Compute engineered features for tickers."""
+    from trading_lab.alpha.features import FeatureEngine
+    import yfinance as yf
+    import numpy as np
+
+    tlist = [t.strip() for t in tickers.split(",")]
+    custom_features = {}
+    if custom:
+        for pair in custom.split(";"):
+            if "=" in pair:
+                name, formula = pair.split("=", 1)
+                custom_features[name.strip()] = formula.strip()
+
+    engine = FeatureEngine(custom_features=custom_features)
+    print(f"\n[bold]Feature Engineering[/bold]\n")
+    for ticker in tlist:
+        hist = yf.Ticker(ticker).history(period=f"{days + 20}d")
+        if len(hist) < days:
+            print(f"[red]Insufficient data for {ticker}[/red]")
+            continue
+        fs = engine.compute(
+            ticker=ticker,
+            open_=hist["Open"].values,
+            high=hist["High"].values,
+            low=hist["Low"].values,
+            close=hist["Close"].values,
+            volume=hist["Volume"].values,
+        )
+        print(f"[green]{ticker}[/green]: {len(fs.names())} features")
+        for name in fs.names()[:5]:
+            val = fs.latest(name)
+            print(f"  {name}: {val:.4f}")
+        if len(fs.names()) > 5:
+            print(f"  ... and {len(fs.names()) - 5} more")
+
+
+@app.command("neural-signal")
+def neural_signal(
+    ticker: str = typer.Option("SPY", "--ticker", "-t"),
+    epochs: int = typer.Option(500, "--epochs", "-e"),
+):
+    """Train neural signal model on features."""
+    from trading_lab.alpha.features import FeatureEngine
+    from trading_lab.alpha.neural_signal import NeuralSignalModel, generate_labels_from_returns
+    import yfinance as yf
+    import numpy as np
+
+    print(f"\n[bold]Neural Signal: {ticker}[/bold]\n")
+    hist = yf.Ticker(ticker).history(period="60d")
+    if len(hist) < 30:
+        print("[red]Insufficient data[/red]")
+        return
+
+    engine = FeatureEngine()
+    fs = engine.compute(
+        ticker=ticker,
+        open_=hist["Open"].values,
+        high=hist["High"].values,
+        low=hist["Low"].values,
+        close=hist["Close"].values,
+        volume=hist["Volume"].values,
+    )
+
+    returns = np.diff(hist["Close"].values) / hist["Close"].values[:-1]
+    labels = generate_labels_from_returns(returns)
+
+    # Create rolling feature sets
+    feature_sets = []
+    for i in range(len(hist) - 1):
+        from trading_lab.alpha.features import FeatureSet
+        fset = FeatureSet(
+            ticker=ticker,
+            features={k: np.array([v[i] if i < len(v) else v[-1]]) for k, v in fs.features.items()},
+        )
+        feature_sets.append(fset)
+
+    model = NeuralSignalModel()
+    model.EPOCHS = epochs
+    metrics = model.train(feature_sets, labels[: len(feature_sets)])
+    print(f"Training: loss={metrics['loss']:.4f}, accuracy={metrics['accuracy']:.1%}")
+    print(f"Parameters: {model.parameter_count()}")
+
+    # Predict latest
+    latest = feature_sets[-1]
+    signal = model.predict(latest)
+    print(f"\nLatest signal: {signal.action} (confidence: {signal.confidence:.1%})")
+    print(f"Probabilities: BUY={signal.probabilities['BUY']:.1%}, HOLD={signal.probabilities['HOLD']:.1%}, SELL={signal.probabilities['SELL']:.1%}")
+
+
+@app.command("run-simulation")
+def run_simulation(
+    tickers: str = typer.Option("SPY", "--tickers", "-t"),
+    days: int = typer.Option(30, "--days", "-d"),
+    agents: str = typer.Option("", "--agents", "-a", help="Comma-separated strategy IDs (default: all registered)"),
+    no_neural: bool = typer.Option(False, "--no-neural", help="Skip neural agent"),
+):
+    """Run multi-agent simulation on historical data."""
+    from trading_lab.alpha.simulation import MultiAgentSimulation
+    from trading_lab.alpha.analytics import SimulationAnalytics
+    from datetime import datetime, timezone
+
+    tlist = [t.strip() for t in tickers.split(",")]
+    agent_list = [a.strip() for a in agents.split(",")] if agents else None
+
+    sim = MultiAgentSimulation(
+        lookback_days=days,
+        tickers=tlist,
+        agents=agent_list,
+        include_neural=not no_neural,
+    )
+    results = sim.run()
+
+    sim_id = f"sim_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    analytics = SimulationAnalytics()
+    report = analytics.analyze(
+        results=results,
+        sim_id=sim_id,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        tickers=tlist,
+        lookback_days=days,
+    )
+
+    print(f"\n[bold]Simulation: {sim_id}[/bold]\n")
+    print(f"Tickers: {', '.join(tlist)}")
+    print(f"Days: {days}")
+    print(f"Agents: {', '.join(report.agents)}")
+    print(f"\n[bold]Leaderboard[/bold]\n")
+    print(f"{'Rank':<6} {'Agent':<20} {'Equity':<10} {'Sharpe':<8} {'Alpha':<8}")
+    print("-" * 60)
+    for e in report.leaderboard:
+        neural_tag = " [neural]" if e.is_neural else ""
+        print(f"{e.rank:<6} {e.agent_id + neural_tag:<20} {e.final_equity:<10.4f} {e.sharpe:<8.2f} {e.alpha_vs_baseline:+.1%}")
+    print(f"\n[bold]Recommendation:[/bold] {report.recommendation}")
+
+
+@app.command("sim-leaderboard")
+def sim_leaderboard(
+    sim_id: str = typer.Option("", "--sim-id", "-s", help="Simulation ID (default: latest)"),
+    limit: int = typer.Option(10, "--limit", "-n"),
+):
+    """Show simulation leaderboard from database."""
+    from trading_lab.alpha.analytics import SimulationAnalytics
+    analytics = SimulationAnalytics()
+    if sim_id:
+        report = analytics.get_report(sim_id)
+        if report:
+            print(analytics.format_report(report))
+        else:
+            print(f"[red]Simulation {sim_id} not found[/red]")
+    else:
+        sims = analytics.list_sims(limit=limit)
+        if not sims:
+            print("[dim]No simulations found.[/dim]")
+            return
+        print(f"\n[bold]Recent Simulations[/bold]\n")
+        print(f"{'Sim ID':<25} {'Time':<20} {'Best Agent':<20} {'Sharpe':<8} {'Alpha'}")
+        print("-" * 90)
+        for s in sims:
+            print(f"{s['sim_id']:<25} {s['timestamp'][:19]:<20} {s['best_agent']:<20} {s['best_sharpe']:<8.2f} {s['alpha_pct']:+.1%}")
+
+
 def print_json(data):
     print(json.dumps(data, indent=2, default=str))
 
