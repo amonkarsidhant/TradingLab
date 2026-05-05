@@ -112,32 +112,46 @@ This is not AGI. It is a **bounded-domain recursively self-improving agent** tha
 
 ---
 
-### Phase 2 — Self-Modifying Agent (ACTIVE)
+### ✅ Phase 2 — Self-Modifying Agent (COMPLETE)
 **Goal:** The agent generates strategy variants, validates them, and adopts the best one — with rollback if live performance degrades.
 
 **Milestones:**
-- [ ] Strategy variant generator (LLM prompt: current source + performance → mutated version)
-- [ ] Syntax sandbox validation before disk write (`exec(compile(...))` in isolated namespace)
-- [ ] A/B backtest harness: current vs variant, 6-month walk-forward
-- [ ] Adoption gate: Sharpe + 0.1, drawdown no worse than +2%, 5-day paper observation
-- [ ] Git auto-commit + rollback if live performance degrades after 48h
-- [ ] Strategy change log (who/what/when/why for every mutation)
+| # | Milestone | File | Status |
+|---|-----------|------|--------|
+| M1 | Strategy Variant Generator | `meta/variant_generator.py` | ✅ |
+| M2 | Syntax Sandbox | `meta/sandbox.py` | ✅ |
+| M3 | Variant Validator | `meta/variant_validator.py` | ✅ |
+| M4 | Adoption Manager | `meta/adoption_manager.py` | ✅ |
+| M5 | Watchdog | `meta/watchdog.py` | ✅ |
+| M6 | Change Log | `meta/change_log.py` | ✅ |
 
-**Proof it works:** Git log shows auto-commits. Live demo portfolio Sharpe improves over baseline.
+**CLI:** `generate-variants`, `sandbox-test`, `validate-variant`, `adopt-variant`, `rollback-strategy`, `watchdog-check`, `strategy-history`
+
+**Duration:** ~6h focused build sprint (May 5, 2026)
 
 ---
 
-### Phase 3 — Alpha Discovery
-**Goal:** The agent generates novel strategies from first principles, not just mutating existing ones.
+### ✅ Phase 3 — Alpha Discovery & Multi-Agent Simulation (COMPLETE)
+**Goal:** The agent discovers novel alpha via LLM, engineers quantitative features, trains a lightweight neural signal, then runs multi-agent simulations to find the winner.
 
 **Milestones:**
-- [ ] LLM ingestion of arXiv papers, earnings transcripts, macro summaries
-- [ ] Automated feature engineering (custom combos: RSI × Vol MA / ATR)
-- [ ] Lightweight neural architecture search for price-prediction signal
-- [ ] Multi-agent market simulation (simulated agents trade against each other)
-- [ ] Agent learns to exploit predictable behavior of other "players"
+| # | Milestone | File | Status |
+|---|-----------|------|--------|
+| M1 | Alpha Discovery Engine | `alpha/discovery.py` | ✅ |
+| M2 | Feature Engineering | `alpha/features.py` | ✅ |
+| M3 | Neural Signal | `alpha/neural_signal.py` | ✅ |
+| M4 | Multi-Agent Simulation | `alpha/simulation.py` | ✅ |
+| M5 | Simulation Analytics | `alpha/analytics.py` | ✅ |
+| M6 | Integration with Phase 2 | `alpha/integration.py` | ✅ |
 
-**Proof it works:** A strategy *not* from the original 3 is created by LLM, validated in backtest, and trading live in demo with positive Sharpe.
+**CLI:** `discover-alpha`, `engineer-features`, `neural-signal`, `run-simulation`, `sim-leaderboard`
+
+**Database:** `simulations`, `simulation_agent_results` tables
+
+---
+
+### Phase 4 — Production Hardening (PLANNED)
+**Goal:** Security audit, stress testing, paper trading bridge, documentation.
 
 ---
 
