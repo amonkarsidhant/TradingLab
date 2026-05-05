@@ -15,6 +15,7 @@ def test(name):
             print(f"  ❌ FAIL: {e}")
             traceback.print_exc()
             failed += 1
+        return fn
     return decorator
 
 # ── Phase 2 ────────────────────────────────────────────────────────────────
