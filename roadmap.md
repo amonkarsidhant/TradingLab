@@ -71,11 +71,11 @@ This is not AGI. It is a **bounded-domain recursively self-improving agent** tha
 ### Phase 0 — Autonomous Regime-Aware Execution Loop
 **Goal:** The agent runs 24/7 with no manual intervention. It detects regime, picks the right strategy, scans, and auto-trades within demo safety rails.
 
-**Milestones:**
-- [ ] VIX proxy (VIXY ETF) + breadth (% SPY above 50MA) + sector rotation (XLY/XLP ratio) live ingestion
-- [ ] Regime classifier maps `(vix_level, breadth, trend)` → `regime_id`
-- [ ] Strategy performance registry tracks Sharpe/win-rate per regime
-- [ ] Auto-strategy selector chooses highest-Sharpe strategy for current regime
+**Current Status (2026-05-05):**
+- [x] VIX proxy (VIXY ETF) + breadth (% SPY above 50MA) + sector rotation (XLY/XLP ratio) live ingestion
+- [x] Regime classifier maps `(vix_level, breadth, trend)` → `regime_id`
+- [x] Strategy performance registry tracks Sharpe/win-rate per regime
+- [x] Auto-strategy selector chooses highest-Sharpe strategy for current regime
 - [ ] Unified scheduler+bot runs hourly: detect → select → scan → trade → log
 - [ ] Regime state + decision logged to SQLite every cycle
 - [ ] EOD/weekly reflection reads regime-aware metrics, not just aggregate
