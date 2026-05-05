@@ -26,12 +26,12 @@ def run_autonomous_cycle():
     selector = StrategySelector()
     strategy_id, strategy_confidence = selector.select(state)
 
-    # 3. Run scan-rank with selected strategy
+    # 3. Run scan-rank with selected strategy (bare tickers for yfinance)
     tickers = [
-        "AAPL_US_EQ", "MSFT_US_EQ", "NVDA_US_EQ", "GOOGL_US_EQ", "AMZN_US_EQ",
-        "META_US_EQ", "TSLA_US_EQ", "AMD_US_EQ", "KO_US_EQ", "JNJ_US_EQ",
-        "PG_US_EQ", "V_US_EQ", "MA_US_EQ", "CRM_US_EQ", "ADBE_US_EQ",
-        "INTC_US_EQ", "CRM_US_EQ", "UNH_US_EQ", "HD_US_EQ", "ABBV_US_EQ",
+        "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN",
+        "META", "TSLA", "AMD", "KO", "JNJ",
+        "PG", "V", "MA", "CRM", "ADBE",
+        "INTC", "UNH", "HD", "ABBV", "XOM",
     ]
     scorer = EntryScorer()
     results = scorer.rank([(strategy_id, t) for t in tickers])
