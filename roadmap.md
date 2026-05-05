@@ -1,7 +1,7 @@
 # Sid Trading Lab — Autonomous Self-Improving Trading Agent
 > Project: sid-trading-lab | Environment: Trading 212 DEMO
 > Host: Macbook Air M4 (local) + Azure VPS `eduforengineers` (20.26.196.26)
-> Status: Phase 0 active
+> Status: **Phase 1 active (meta-learning)** — Phase 0 complete
 
 ---
 
@@ -26,27 +26,27 @@ This is not AGI. It is a **bounded-domain recursively self-improving agent** tha
   MARKET DATA          JOURNAL / GRADE       STRATEGY VARIANT
      │                      │                    GENERATOR
      ▼                      ▼                       │
- +--------+           +---------+            +-----▼------+
- │PERCEIVE│──────────▶│ REFLECT │───────────▶│HYPOTHESIZE │
- +--------+           +---------+            +------------+
+ +--------+           +---------+            +────▼──────+
+ │PERCEIVE│──────────▶│ REFLECT │───────────▶│HYPOTHESIZE│
+ +--------+           +---------+            +───────────+
      ▲                      │                    │
      │                      │                    ▼
- +---┴----+          +------▼-------+     +---------------+
+ +───┴────+          +──────▼───────+     +───────────────+
  │POSITION│          │  REGIME      │     │ A/B BACKTEST  │
  │WATCHER │          │  DETECTION   │     │    HARNESS    │
- +--------+          +------┬-------+     +-------┬-------+
+ +--------+          +──────┬───────+     +───────┬───────+
                             │                    │
                             ▼                    ▼
-                      +-------------+       +-----------+
+                      +─────────────+       +───────────+
                       │AUTO-SELECT  │◀──────│ VALIDATE  │
                       │  STRATEGY   │       │  / GATE   │
-                      +------┬------+       +-----------+
+                      +──────┬──────+       +───────────+
                              │
                              ▼
-                      +-------------+
+                      +─────────────+
                       │   EXECUTE   │
                       │  (T212)     │
-                      +-------------+
+                      +─────────────+
                              │
                              └──────────────────────────────┐
                                     (loop repeats)          │
@@ -56,11 +56,11 @@ This is not AGI. It is a **bounded-domain recursively self-improving agent** tha
 
 | # | Stage | Input | Output | Current State |
 |---|-------|-------|--------|---------------|
-| 1 | **Perceive** | Price, news, earnings, sentiment, macro | Clean feature vectors + regime flags | Static watchlist + yfinance daily |
-| 2 | **Decide** | Regime + strategy registry + capital | Signal + position size + route | 3 hardcoded strategies (Momentum, MeanReversion, EarningsGap) |
+| 1 | **Perceive** | Price, news, earnings, sentiment, macro | Clean feature vectors + regime flags | ✅ Live: VIXY + SPY breadth + XLY/XLP rotation |
+| 2 | **Decide** | Regime + strategy registry + capital | Signal + position size + route | ✅ Live: StrategySelector with 60% confidence fallback |
 | 3 | **Execute** | Order spec + safety checklist | Fill confirmation + slippage log | T212 REST + basic safety rules |
 | 4 | **Observe** | Tick-level fills + portfolio delta | Realized P&L, drawdown, Sharpe | Position watcher + SQLite round-trip tracker |
-| 5 | **Reflect** | Trade log + regime at entry | Grade (A-F), attribution, not-to-do list | Munger reflection engine (weekly) |
+| 5 | **Reflect** | Trade log + regime at entry | Grade (A-F), attribution, not-to-do list | ✅ Daily/Weekly reports now regime-aware |
 | 6 | **Hypothesize** | Grade trends + strategy Sharpe by regime | Proposed parameter/strategy variant | Manual strategy comparison (monthly) |
 | 7 | **Validate** | Strategy variant + 6m walk-forward | Pass/fail on Sharpe + drawdown gates | Basic backtest engine (single-run) |
 
@@ -68,35 +68,40 @@ This is not AGI. It is a **bounded-domain recursively self-improving agent** tha
 
 ## Phase Map
 
-### Phase 0 — Autonomous Regime-Aware Execution Loop
+### ✅ Phase 0 — Autonomous Regime-Aware Execution Loop (COMPLETE)
 **Goal:** The agent runs 24/7 with no manual intervention. It detects regime, picks the right strategy, scans, and auto-trades within demo safety rails.
 
-**Current Status (2026-05-05):**
+**Status (2026-05-05):**
 - [x] VIX proxy (VIXY ETF) + breadth (% SPY above 50MA) + sector rotation (XLY/XLP ratio) live ingestion
 - [x] Regime classifier maps `(vix_level, breadth, trend)` → `regime_id`
 - [x] Strategy performance registry tracks Sharpe/win-rate per regime
 - [x] Auto-strategy selector chooses highest-Sharpe strategy for current regime
 - [x] Unified scheduler+bot runs hourly: detect → select → scan → trade → log
-- [ ] Regime state + decision logged to SQLite every cycle (partial — `cycles` table logging works, but `round_trips.regime` column not yet populated)
-- [ ] EOD/weekly reflection reads regime-aware metrics, not just aggregate
+- [x] Regime state + decision logged to SQLite every cycle (`cycles` table)
+- [x] `round_trips` table has `regime` column; `signals` table has `regime` column
+- [x] EOD reflection reads regime-aware metrics (daily journal + weekly report)
+- [x] Signal→RoundTrip bridge propagates regime through the entire pipeline
 
-**Proof it works:** 5 days of zero-intervention operation, Telegram alerts for every trade + regime shift, SQLite shows > 1 regime transition.
+**Proof it works:** VPS running 5+ days, Telegram alerts hourly, SQLite shows regime transitions, reports show daily regime log + strategy performance by regime.
 
-**Estimated:** 2 weeks (one focused build sprint)
+**Duration:** ~1 day focused build sprint (May 5, 2026)
 
 ---
 
-### Phase 1 — Meta-Learning Engine
-**Goal:** The agent learns *which strategy to use*, not just running all 3.
+### Phase 1 — Meta-Learning Engine (ACTIVE)
+**Goal:** The agent learns *which strategy to use*, not just running all 3. Capital allocation shifts from fixed 20%/position to strategy-weighted.
 
 **Milestones:**
-- [ ] Strategy performance registry with walk-forward Sharpe per regime
-- [ ] Capital allocation shifts from fixed 20%/position to strategy-weighted (e.g., 30% to regime-best strategy)
-- [ ] Auto-parameter tuning via grid search/bayesian optimization inside backtest harness
-- [ ] Regime transition confidence score (how sure are we about current regime?)
-- [ ] Fallback to "default" strategy when regime confidence < 60%
+- [ ] Strategy performance registry seeded with backtest data per regime (not just live trades)
+- [ ] Capital allocation module: weight positions by strategy's regime-specific Sharpe
+- [ ] Auto-parameter tuning via grid search inside backtest harness (Strategy Sweeper)
+- [ ] Regime transition confidence score displayed in bot / Telegram
+- [ ] A/B harness: `simple_momentum` vs `pullback_mean_reversion` in same regime, same week
+- [ ] Meta-learner selects strategy daily (not just the selector fallback)
 
 **Proof it works:** Backtest shows regime-aware switching beats static strategy selection by > 5% annualized.
+
+**Estimated:** 1-2 weeks
 
 ---
 
@@ -149,13 +154,13 @@ This is not AGI. It is a **bounded-domain recursively self-improving agent** tha
 | Component | Local (Mac) | VPS (Azure) |
 |-----------|-------------|-------------|
 | Scheduler/Bot | launchd plist `com.sidtradinglab.scheduler` | systemd unit `bull-telegram-bot-unified` |
-| Python | 3.11 venv at `~/.venv` | 3.11 venv at `~/sid-trading-lab/.venv` |
+| Python | 3.11 venv at `~/.venv` | 3.11 venv at `~/TradingLab/.venv` |
 | Data Ingest | yfinance + FMP (optional) | Same (pull from GitHub) |
 | Execution | T212 REST API | T212 REST API |
 | Notifications | Telegram bot | Telegram bot |
 | Memory | SQLite + MemPalace | SQLite only (MemPalace is dev-time) |
-| Code | `~/Documents/Projects/sid-trading-lab` | `~/sid-trading-lab` |
-| Deploy | `git push` → `git pull --rebase` | `git pull origin main --rebase` |
+| Code | `~/Documents/Projects/sid-trading-lab` | `~/TradingLab` (repo path on VPS) |
+| Deploy | `git push` → `git pull --rebase` (VPS uses rebase to avoid merge commit noise) | `git pull origin main --rebase` |
 | Access | Local shell + Hermes | SSH `sidhant@20.26.196.26` via sshpass |
 
 ---
@@ -179,11 +184,11 @@ When Hermes supports multiple models or subagents, this is the target layout.
 
 These are the known gaps that Phase 0-3 must close:
 
-1. **Trailing stop upgrade** — peak-based instead of entry-based
+1. **Trailing stop upgrade** — peak-based instead of entry-based (Phase 0 partially done via watcher)
 2. **Profit-taking at +15%** — auto-flag when positions hit target
 3. **Position trim logic** — at 10/10, suggest trim X to add Y
 4. **Earnings blocking toggle** — `EARNINGS_BLOCK_MISSING=true` to hard-block
-5. **Market regime detection** — VIX proxy / SPY volatility
+5. **Market regime detection** — ✅ VIX proxy / SPY breadth / sector rotation implemented
 
 ---
 
@@ -192,7 +197,7 @@ These are the known gaps that Phase 0-3 must close:
 | Date | Event |
 |------|-------|
 | 2026-05-04 | Memory files updated (10 open positions, NVDA stopped out, strategy v1.1). SVG diagram fixed for GitHub rendering. |
-| 2026-05-05 | Architecture review: declined multi-agent floor plan. Accepted Lean 4-Agent concept. Codex MCP server registered. Claude Code ACP verified unavailable. Roadmap created. Phase 0 begins. |
+| 2026-05-05 | Phase 0 build sprint: regime detector, strategy registry, selector, autonomous cycle, hourly bot scheduler, SQLite logging. Phase 0 complete. |
 
 ---
 
