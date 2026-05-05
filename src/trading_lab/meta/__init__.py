@@ -14,7 +14,7 @@ Modules:
 """
 from trading_lab.meta.ab_harness import ABHarness, ABResult
 from trading_lab.meta.adoption_manager import AdoptionManager, AdoptionResult
-from trading_lab.meta.allocator import CapitalAllocator, CapitalAllocationResult
+from trading_lab.meta.allocator import Allocation, CapitalAllocator
 from trading_lab.meta.change_log import ChangeLog, ChangeLogRecord
 from trading_lab.meta.performance_feedback import PerformanceFeedback
 from trading_lab.meta.sandbox import SandboxResult, SyntaxSandbox
