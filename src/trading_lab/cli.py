@@ -961,6 +961,52 @@ def scan_rank(
         print(f"{i:<5} {r['ticker']:<20} {r['score']:<8} {f['sharpe']['raw']:<8} {str(f['profit_factor']['raw'] or '-'):<6} {'Y' if f['stability']['stable'] else 'N':<8} {f['outperformance']['raw']:<8} {r['verdict']:<10}")
 
 
+# ── Phase 0: regime-aware commands ──────────────────────────────────────────────────
+
+@app.command("detect-regime")
+def detect_regime_cmd():
+    """Detect current market regime from VIXY, SPY, breadth, and sector rotation."""
+    from trading_lab.regime.detector import RegimeDetector
+    state = RegimeDetector().detect()
+    print(f"[bold]Regime: {state.regime.value}[/bold] (confidence: {state.confidence:.2f})")
+    print(f"  VIX proxy (VIXY):    {state.vix_proxy:.2f}")
+    print(f"  Market breadth:      {state.breadth_pct:.2%}")
+    print(f"  Sector rotation:     {state.sector_rotation:.3f}")
+    print(f"  Trend score:         {state.trend_score:.4f}")
+    print(f"  Timestamp:           {state.timestamp}")
+
+
+@app.command("strategy-rank-by-regime")
+def strategy_rank_by_regime(
+    regime: str = typer.Option("", help="Regime to query (or 'current' to detect live)"),
+    min_trades: int = typer.Option(5, help="Minimum trades for inclusion"),
+):
+    """Rank strategies by Sharpe for a given regime."""
+    from trading_lab.regime.detector import RegimeDetector
+    from trading_lab.registry.selector import StrategySelector
+    from trading_lab.registry.performance import StrategyPerformanceRegistry
+
+    if regime == "current" or not regime:
+        state = RegimeDetector().detect()
+        regime = state.regime.value
+        print(f"[dim]Detected regime: {regime} (confidence {state.confidence:.2f})[/dim]\n")
+
+    registry = StrategyPerformanceRegistry()
+    rows = registry.all_for_regime(regime)
+    filtered = [r for r in rows if r["trade_count"] >= min_trades]
+
+    if not filtered:
+        print(f"[yellow]No strategies with >= {min_trades} trades for regime '{regime}'.[/yellow]")
+        print(f"  Available records: {len(rows)} (all with fewer trades)")
+        return
+
+    print(f"[bold]Strategies ranked for regime: {regime}[/bold]\n")
+    print(f"{'#':<4} {'Strategy':<20} {'Sharpe':<8} {'Win%':<8} {'Trades':<8} {'AvgDays':<10}")
+    print("-" * 60)
+    for i, r in enumerate(filtered, 1):
+        print(f"{i:<4} {r['strategy_id']:<20} {r['sharpe']:<8.2f} {r['win_rate']:<8.2%} {r['trade_count']:<8} {r['avg_hold_days']:<10.1f}")
+
+
 @app.command("allocate")
 def allocate(
     save_snapshot: bool = typer.Option(False, "--save-snapshot"),
