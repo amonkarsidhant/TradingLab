@@ -916,8 +916,22 @@ async def run_scheduled_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 def setup_job_queue(application: Application) -> None:
     """Register cron jobs using PTB JobQueue (same event loop as bot)."""
     for job_def in JOBS:
-        hour = job_def["schedule"]["hour"]
-        minute = job_def["schedule"]["minute"]
+        schedule = job_def["schedule"]
+
+        # Handle hourly repeating jobs
+        if schedule.get("hour") == "*/1":
+            job = application.job_queue.run_repeating(
+                run_scheduled_job,
+                interval=3600,  # 1 hour in seconds
+                first=10,       # First run 10s after start
+                name=job_def["id"],
+            )
+            logger.info(f"Scheduled {job_def['id']} hourly via JobQueue")
+            job.data = job_def
+            continue
+
+        hour = schedule["hour"]
+        minute = schedule["minute"]
         run_time = time(hour=hour, minute=minute, tzinfo=timezone.utc)
 
         if job_def["id"] == "weekly":
