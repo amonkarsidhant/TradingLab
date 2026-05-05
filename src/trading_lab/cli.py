@@ -1047,6 +1047,173 @@ def allocate(
         print("[green]Snapshot saved.[/green]")
 
 
+@app.command("seed-registry")
+def seed_registry_command(
+    days: int = typer.Option(180, "--days", "-d", help="Historical lookback days"),
+    tickers: str = typer.Option(
+        "SPY,AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA,AMD,CRM",
+        "--tickers", "-t", help="Comma-separated tickers to backtest",
+    ),
+    db_path: str = typer.Option("./trading_lab.sqlite3", "--db-path", help="SQLite DB path"),
+    min_window: int = typer.Option(10, "--min-window", help="Minimum regime window days"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would happen without writing"),
+    fast: bool = typer.Option(False, "--fast", help="Seed with SPY only (faster)"),
+):
+    """Seed strategy_regime_performance with historical backtests."""
+    import subprocess, sys
+    script = Path(__file__).resolve().parent.parent / "scripts" / "seed_registry.py"
+    args = [
+        sys.executable, str(script),
+        "--days", str(days),
+        "--tickers", tickers,
+        "--db-path", db_path,
+        "--min-window", str(min_window),
+    ]
+    if dry_run:
+        args.append("--dry-run")
+    if fast:
+        args.append("--fast")
+    subprocess.run(args)
+
+
+@app.command("sweep-strategies")
+def sweep_strategies(
+    tickers: str = typer.Option(
+        "SPY,AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA,AMD,CRM",
+        "--tickers", "-t", help="Comma-separated tickers",
+    ),
+    lookback_days: int = typer.Option(126, "--lookback", "-l", help="Days to backtest per window"),
+    save_registry: bool = typer.Option(True, "--save/--no-save", help="Write to strategy_regime_performance"),
+):
+    """Walk-forward sweep: backtest all strategies across regime windows."""
+    from trading_lab.meta.sweeper import StrategySweeper
+    tlist = [t.strip() for t in tickers.split(",")]
+    sweeper = StrategySweeper(tickers=tlist, lookback_days=lookback_days)
+    results = sweeper.sweep(save_registry=save_registry)
+    print(f"\n[bold]Sweep complete. {len(results)} results.[/bold]\n")
+    print(f"{'Strategy':<20} {'Regime':<12} {'Sharpe':<8} {'Win%':<8} {'Trades':<8}")
+    print("-" * 60)
+    for r in results:
+        print(f"{r.strategy_id:<20} {r.regime:<12} {r.sharpe:<8.2f} {r.win_rate:<8.2%} {r.total_trades:<8}")
+
+
+@app.command("regime-allocate")
+def regime_allocate(
+    regime: str = typer.Option("", "--regime", "-r", help="Regime name (omit for auto-detect)"),
+    strategy: str = typer.Option("", "--strategy", "-s", help="Strategy ID (omit for best in regime)"),
+    total_equity: float = typer.Option(0.0, "--equity", "-e", help="Total equity (0 = fetch from T212)"),
+    open_positions: int = typer.Option(-1, "--positions", "-p", help="Open position count (-1 = auto)"),
+    tickers: str = typer.Option("SPY,AAPL,MSFT", "--tickers", "-t", help="Comma-separated tickers"),
+):
+    """Regime-aware position sizing using backtest Sharpe from registry."""
+    from trading_lab.meta.allocator import CapitalAllocator
+    from trading_lab.brokers.trading212 import Trading212Client
+    from trading_lab.regime.detector import RegimeDetector
+    from trading_lab.registry.selector import StrategySelector
+
+    settings = get_settings()
+
+    if not regime:
+        state = RegimeDetector().detect()
+        regime = state.regime.value
+        print(f"[dim]Detected regime: {regime} (confidence {state.confidence:.2f})[/dim]\n")
+
+    if not strategy:
+        selector = StrategySelector()
+        strategy, confidence = selector.select(state)
+        print(f"Selected strategy: {strategy} (confidence {confidence:.2f})")
+
+    if total_equity <= 0:
+        client = Trading212Client(settings)
+        summary = client.account_summary()
+        total_equity = summary.get("totalValue", 0)
+        cash = summary.get("cash", {}).get("availableToTrade", 0)
+        open_positions = open_positions if open_positions >= 0 else len(client.positions())
+    else:
+        cash = None
+
+    allocator = CapitalAllocator()
+    tlist = [t.strip() for t in tickers.split(",")]
+    allocations = allocator.allocate(
+        regime=regime,
+        strategy_id=strategy,
+        total_equity=total_equity,
+        open_positions=open_positions,
+        tickers=tlist,
+        current_cash=cash,
+    )
+
+    print(f"[bold]Allocations for {regime} / {strategy}[/bold]\n")
+    print(f"{'Ticker':<8} {'Value':<12} {'%Equity':<10} {'Conf':<8} {'Reason'}")
+    print("-" * 60)
+    for a in allocations:
+        print(f"{a.ticker:<8} ${a.target_value:<11,.2f} {a.target_pct:<10.2%} {a.confidence:<8.2f} {a.reason}")
+
+
+@app.command("ab-test")
+def ab_test(
+    baseline: str = typer.Option("simple_momentum", "--baseline", "-b", help="Baseline strategy"),
+    variant: str = typer.Option("ma_crossover", "--variant", "-v", help="Variant strategy"),
+    tickers: str = typer.Option(
+        "SPY,AAPL,MSFT,GOOGL,AMZN", "--tickers", "-t", help="Comma-separated tickers",
+    ),
+    lookback_days: int = typer.Option(126, "--lookback", "-l", help="Backtest days per ticker"),
+):
+    """A/B test two strategies on the same tickers. Verdict: pass, fail, inconclusive."""
+    from trading_lab.meta.ab_harness import ABHarness
+    tlist = [t.strip() for t in tickers.split(",")]
+    harness = ABHarness()
+    results = harness.compare(baseline, variant, tickers=tlist, lookback_days=lookback_days)
+    print(f"\n[bold]A/B Test: {baseline} vs {variant}[/bold]\n")
+    print(f"{'Ticker':<8} {'Base#':<6} {'Var#':<6} {'SharpeDiff':<11} {'WinDiff':<9} {'t-stat':<8} {'p-value':<10} {'Verdict'}")
+    print("-" * 80)
+    for r in results:
+        print(
+            f"{r.ticker:<8} {r.baseline_trades:<6} {r.variant_trades:<6} "
+            f"{r.sharpe_diff:+10.2f} {r.win_rate_diff:+8.1f}% "
+            f"{r.t_stat!s:<8} {r.p_value!s:<10} {r.verdict.upper()}"
+        )
+    adopted = [r.ticker for r in results if r.verdict == "pass"]
+    if adopted:
+        print(f"\n[green]Variant PASSES on: {', '.join(adopted)}[/green]")
+
+
+@app.command("performance-feedback")
+def performance_feedback(
+    strategy_id: str = typer.Option("", "--strategy", "-s", help="Filter to one strategy"),
+    since: str = typer.Option("", "--since", help="YYYY-MM-DD (default: 7 days ago)"),
+    report: bool = typer.Option(False, "--report", help="Write to file"),
+):
+    """Compare live P&L to backtest expected — flag divergence."""
+    from trading_lab.meta.performance_feedback import PerformanceFeedback
+    fb = PerformanceFeedback()
+    results = fb.report(since=since, strategy_id=strategy_id)
+    if not results:
+        print("[yellow]No live trades with regime labels found.[/yellow]")
+        return
+    print(f"\n[bold]Performance Feedback[/bold]\n")
+    print(f"{'Strategy':<20} {'Regime':<12} {'LiveSharpe':<11} {'ExpSharpe':<11} {'Alert':<8} {'Reason'}")
+    print("-" * 90)
+    for r in results:
+        alert_color = {
+            "none": "[green]", "watch": "[yellow]",
+            "warning": "[orange]", "critical": "[red]",
+        }.get(r.alert, "")
+        print(
+            f"{r.strategy_id:<20} {r.regime:<12} {r.live_sharpe:<11.2f} "
+            f"{r.expected_sharpe:<11.2f} {alert_color}{r.alert.upper():<8}[/] {r.reason}"
+        )
+    criticals = [r for r in results if r.alert == "critical"]
+    if criticals:
+        print(f"\n[red]CRITICAL: {len(criticals)} strategy-regime pair(s) underperforming.[/red]")
+    elif results:
+        print(f"\n[dim]No critical alerts.[/dim]")
+    if report:
+        path = Path("feedback_report.md")
+        path.write_text("\n".join(f"- {r.strategy_id} / {r.regime}: {r.alert}" for r in results))
+        print(f"[green]Report written to {path}[/green]")
+
+
 def print_json(data):
     print(json.dumps(data, indent=2, default=str))
 

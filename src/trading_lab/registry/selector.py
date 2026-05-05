@@ -11,10 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 class StrategySelector:
-    """Selects the best strategy for a given regime, falling back to default if confidence is low."""
+    """Selects the best strategy for a given regime, falling back to default if confidence is low.
+    Phase 1 M4: adds PAUSE_THRESHOLD for autonomous cycle halt."""
 
     DEFAULT_STRATEGY = "simple_momentum"
-    CONFIDENCE_THRESHOLD = 0.60
+    CONFIDENCE_THRESHOLD = 0.60  # for strategy selection
+    PAUSE_THRESHOLD = 0.40         # Phase 1 M4: halt new entries below this
     MIN_TRADES = 5
 
     def __init__(
