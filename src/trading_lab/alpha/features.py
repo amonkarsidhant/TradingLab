@@ -91,6 +91,12 @@ def _atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, window: int = 14)
 
 def _bbands(prices: np.ndarray, window: int = 20, num_std: float = 2.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Bollinger Bands: upper, middle, lower."""
+    if len(prices) < window:
+        return (
+            np.full_like(prices, np.nan),
+            np.full_like(prices, np.nan),
+            np.full_like(prices, np.nan),
+        )
     middle = _sma(prices, window)
     std = np.array([np.std(prices[i : i + window]) for i in range(len(prices) - window + 1)])
     upper = middle + num_std * std
