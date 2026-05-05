@@ -46,6 +46,13 @@ class SyntaxSandbox:
         "zip", "True", "False", "None",
     }
 
+    ALLOWED_IMPORTS = {
+        "trading_lab.models",
+        "trading_lab.strategies.base",
+        "numpy",
+        "__future__",
+    }
+
     @classmethod
     def validate(cls, source_code: str) -> SandboxResult:
         """Full validation pipeline: syntax → imports → instantiation → test call.
@@ -86,12 +93,12 @@ class SyntaxSandbox:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    mod = alias.name.split(".")[0]
-                    if mod in cls.FORBIDDEN_IMPORTS:
+                    mod = alias.name
+                    if mod not in cls.ALLOWED_IMPORTS and mod.split(".")[0] not in cls.ALLOWED_IMPORTS:
                         forbidden.append(mod)
             elif isinstance(node, ast.ImportFrom):
-                mod = (node.module or "").split(".")[0]
-                if mod in cls.FORBIDDEN_IMPORTS:
+                mod = node.module or ""
+                if mod not in cls.ALLOWED_IMPORTS and mod.split(".")[0] not in cls.ALLOWED_IMPORTS:
                     forbidden.append(mod)
 
         if forbidden:
