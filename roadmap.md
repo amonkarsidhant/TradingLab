@@ -76,8 +76,8 @@ This is not AGI. It is a **bounded-domain recursively self-improving agent** tha
 - [x] Regime classifier maps `(vix_level, breadth, trend)` → `regime_id`
 - [x] Strategy performance registry tracks Sharpe/win-rate per regime
 - [x] Auto-strategy selector chooses highest-Sharpe strategy for current regime
-- [ ] Unified scheduler+bot runs hourly: detect → select → scan → trade → log
-- [ ] Regime state + decision logged to SQLite every cycle
+- [x] Unified scheduler+bot runs hourly: detect → select → scan → trade → log
+- [ ] Regime state + decision logged to SQLite every cycle (partial — `cycles` table logging works, but `round_trips.regime` column not yet populated)
 - [ ] EOD/weekly reflection reads regime-aware metrics, not just aggregate
 
 **Proof it works:** 5 days of zero-intervention operation, Telegram alerts for every trade + regime shift, SQLite shows > 1 regime transition.
