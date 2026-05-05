@@ -1181,6 +1181,200 @@ def ab_test(
         print(f"\n[dim]Results saved to ab_results table.[/dim]")
 
 
+@app.command("generate-variants")
+def generate_variants_command(
+    strategy: str = typer.Option("simple_momentum", "--strategy", "-s", help="Base strategy to mutate"),
+    n: int = typer.Option(3, "--n", help="Number of variants to generate"),
+):
+    """Use LLM to generate strategy variants targeting the weakest regime."""
+    from trading_lab.meta.variant_generator import StrategyVariantGenerator
+    gen = StrategyVariantGenerator()
+    variants = gen.generate(strategy, n_variants=n)
+    if not variants:
+        print("[red]No variants generated. Check LLM provider config.[/red]")
+        return
+    print(f"\n[bold]Generated {len(variants)} variants for {strategy}[/bold]\n")
+    for i, v in enumerate(variants, 1):
+        print(f"{i}. [cyan]{v.name}[/cyan]")
+        print(f"   Rationale: {v.rationale}")
+        print(f"   Weakest regime: {v.weakest_regime}")
+        print(f"   Code preview: {v.code[:120]}...")
+        print()
+
+
+@app.command("sandbox-test")
+def sandbox_test_command(
+    file: str = typer.Option(..., "--file", "-f", help="Path to variant .py file"),
+):
+    """Validate generated strategy code: syntax, imports, instantiation, test call."""
+    from trading_lab.meta.sandbox import SyntaxSandbox
+    path = Path(file)
+    if not path.exists():
+        print(f"[red]File not found: {file}[/red]")
+        raise typer.Exit(1)
+    source = path.read_text()
+    result = SyntaxSandbox.validate(source)
+    print(f"\n[bold]Sandbox Test: {file}[/bold]\n")
+    status = "[green]PASS[/green]" if result.valid else "[red]FAIL[/red]"
+    print(f"Valid: {status}")
+    if result.error:
+        print(f"Error: {result.error}")
+    if result.forbidden_imports:
+        print(f"Forbidden imports: {', '.join(result.forbidden_imports)}")
+    print(f"Has generate_signal: {result.has_generate_signal}")
+    print(f"SignalAction valid: {result.signal_action_valid}")
+    if result.test_signal:
+        print(f"Test signal: {result.test_signal}")
+
+
+@app.command("validate-variant")
+def validate_variant_command(
+    file: str = typer.Option(..., "--file", "-f", help="Path to variant .py file"),
+    baseline: str = typer.Option("simple_momentum", "--baseline", "-b", help="Baseline strategy"),
+    tickers: str = typer.Option("SPY", "--tickers", "-t", help="Comma-separated tickers"),
+    lookback: int = typer.Option(126, "--lookback", "-l", help="Backtest days"),
+):
+    """Run backtest + A/B composite gate on a variant against baseline."""
+    from trading_lab.meta.variant_validator import VariantValidator
+    path = Path(file)
+    if not path.exists():
+        print(f"[red]File not found: {file}[/red]")
+        raise typer.Exit(1)
+    source = path.read_text()
+    validator = VariantValidator()
+    tlist = [t.strip() for t in tickers.split(",")]
+    result = validator.validate(source, baseline, tickers=tlist, lookback_days=lookback)
+    if result is None:
+        print("[red]Validation failed — no results[/red]")
+        return
+    print(f"\n[bold]Variant Validation: {result.variant_name} vs {baseline}[/bold]\n")
+    status = "[green]PASS[/green]" if result.passes else "[red]FAIL[/red]"
+    print(f"Verdict: {status}")
+    print(f"Sharpe diff: {result.sharpe_diff:+.3f}")
+    print(f"Win rate diff: {result.win_rate_diff:+.1%}")
+    print(f"Drawdown delta: {result.dd_delta:+.2f}%")
+    print(f"p-value: {result.p_value}")
+    print(f"Composite score: {result.composite_score:.3f}")
+    print(f"Reason: {result.reason}")
+
+
+@app.command("adopt-variant")
+def adopt_variant_command(
+    file: str = typer.Option(..., "--file", "-f", help="Path to variant .py file"),
+    baseline: str = typer.Option("simple_momentum", "--baseline", "-b", help="Baseline strategy"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Simulate without git commit"),
+    force: bool = typer.Option(False, "--force", help="Skip validation and adopt directly"),
+):
+    """Adopt a validated variant: git commit + swap active strategy."""
+    from trading_lab.meta.adoption_manager import AdoptionManager
+    from trading_lab.meta.variant_validator import VariantValidator
+    path = Path(file)
+    if not path.exists():
+        print(f"[red]File not found: {file}[/red]")
+        raise typer.Exit(1)
+    source = path.read_text()
+
+    # Auto-validate unless --force
+    validation = None
+    if not force:
+        validator = VariantValidator()
+        validation = validator.validate(source, baseline)
+        if validation is None or not validation.passes:
+            print("[red]Validation failed. Use --force to override.[/red]")
+            if validation:
+                print(f"Reason: {validation.reason}")
+            return
+
+    manager = AdoptionManager()
+    variant_name = Path(file).stem
+    result = manager.adopt(
+        variant_source=source,
+        variant_name=variant_name,
+        baseline_id=baseline,
+        validation=validation,
+        dry_run=dry_run,
+    )
+    print(f"\n[bold]Adoption Result[/bold]\n")
+    print(f"Strategy: {result.strategy_id}")
+    print(f"Action: {result.action}")
+    if result.git_commit:
+        print(f"Git commit: {result.git_commit[:8]}")
+    if result.pre_adopt_tag:
+        print(f"Pre-adoption tag: {result.pre_adopt_tag}")
+    if result.error:
+        print(f"[red]Error: {result.error}[/red]")
+
+
+@app.command("rollback-strategy")
+def rollback_strategy_command(
+    variant: str = typer.Option(..., "--variant", "-v", help="Variant strategy ID to roll back"),
+    baseline: str = typer.Option("simple_momentum", "--baseline", "-b", help="Baseline to restore"),
+    reason: str = typer.Option("live_performance_degraded", "--reason", "-r", help="Rollback reason"),
+):
+    """Rollback to pre-adoption baseline strategy."""
+    from trading_lab.meta.adoption_manager import AdoptionManager
+    manager = AdoptionManager()
+    result = manager.rollback(variant, baseline, reason=reason)
+    print(f"\n[bold]Rollback Result[/bold]\n")
+    print(f"Variant: {result.strategy_id}")
+    print(f"Action: {result.action}")
+    if result.git_commit:
+        print(f"Git commit: {result.git_commit[:8]}")
+    if result.pre_adopt_tag:
+        print(f"Restored from tag: {result.pre_adopt_tag}")
+    if result.error:
+        print(f"[red]Error: {result.error}[/red]")
+
+
+@app.command("watchdog-check")
+def watchdog_check_command(
+    variant: str = typer.Option(..., "--variant", "-v", help="Variant strategy ID"),
+    baseline: str = typer.Option("simple_momentum", "--baseline", "-b", help="Baseline strategy ID"),
+):
+    """Check 48h observation window after adoption."""
+    from trading_lab.meta.watchdog import AdoptionWatchdog
+    w = AdoptionWatchdog()
+    result = w.check(variant, baseline)
+    print(f"\n[bold]Watchdog Check: {variant}[/bold]\n")
+    status_color = {
+        "observing": "[yellow]",
+        "confirmed": "[green]",
+        "rollback_triggered": "[red]",
+        "rollback_failed": "[red]",
+        "insufficient_data": "[dim]",
+    }.get(result.status, "")
+    print(f"Status: {status_color}{result.status.upper()}[/]")
+    print(f"Hours elapsed: {result.hours_elapsed}")
+    print(f"Live Sharpe: {result.live_sharpe:.2f} (expected: {result.expected_sharpe:.2f})")
+    print(f"Live Drawdown: {result.live_drawdown:.1f}% (expected: {result.expected_drawdown:.1f}%)")
+    print(f"Reason: {result.reason}")
+
+
+@app.command("strategy-history")
+def strategy_history_command(
+    strategy: str = typer.Option("", "--strategy", "-s", help="Filter to one strategy"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max rows"),
+):
+    """Show immutable audit trail of strategy mutations."""
+    from trading_lab.meta.change_log import ChangeLog
+    log = ChangeLog()
+    rows = log.list_changes(strategy_id=strategy, limit=limit)
+    if not rows:
+        print("[dim]No change log entries found.[/dim]")
+        return
+    print(f"\n[bold]Strategy Change Log[/bold] ({len(rows)} entries)\n")
+    print(f"{'Time':<20} {'Strategy':<25} {'Action':<10} {'Score':<8} {'Reason'}")
+    print("-" * 100)
+    for r in rows:
+        ts = r.get("timestamp", "")[:19]
+        sid = r.get("strategy_id", "")
+        action = r.get("action", "")
+        score = r.get("composite_score", 0.0)
+        reason = (r.get("reason", "") or "")[:50]
+        print(f"{ts:<20} {sid:<25} {action:<10} {score:<8.2f} {reason}")
+    print(f"\n[dim]Success rate: {log.success_rate():.1f}% (adoptions not rolled back)[/dim]")
+
+
 @app.command("performance-feedback")
 def performance_feedback(
     strategy_id: str = typer.Option("", "--strategy", "-s", help="Filter to one strategy"),
