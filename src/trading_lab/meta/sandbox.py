@@ -43,7 +43,8 @@ class SyntaxSandbox:
         "abs", "all", "any", "bool", "dict", "enumerate", "filter",
         "float", "int", "len", "list", "map", "max", "min", "range",
         "round", "set", "slice", "sorted", "str", "sum", "tuple",
-        "zip", "True", "False", "None", "__import__",
+        "zip", "True", "False", "None", "__import__", "__build_class__",
+        "type", "object", "isinstance", "issubclass", "hasattr", "getattr",
     }
 
     ALLOWED_IMPORTS = {
