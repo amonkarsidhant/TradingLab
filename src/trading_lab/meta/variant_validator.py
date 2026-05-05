@@ -101,17 +101,8 @@ class VariantValidator:
 
         # Step 3: Backtest both
         tickers = tickers or ["SPY"]
-        ab_results = self._ab.compare(
-            baseline_name=baseline_id,
-            variant_name=variant_name,  # ABHarness will use get_strategy; we need a workaround
-            tickers=tickers,
-            lookback_days=lookback_days,
-            persist=False,
-        )
-
-        # ABHarness expects both strategies to be in the registry.
-        # Since the variant is not yet registered, we need a custom comparison.
-        # Fall back to manual backtest + comparison.
+        # ABHarness requires both strategies to be in registry; variant is not yet registered.
+        # Use manual validation instead.
         return self._manual_validate(variant_cls, baseline_id, tickers, lookback_days)
 
     # ── Manual validation (since variant is not in registry) ──────────────────────
