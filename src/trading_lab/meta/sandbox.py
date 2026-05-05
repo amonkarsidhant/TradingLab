@@ -112,12 +112,19 @@ class SyntaxSandbox:
             )
 
         # Layer 3: Instantiate in isolated namespace
-        namespace: dict[str, Any] = {
-            "__builtins__": {name: __builtins__[name] for name in cls.SAFE_BUILTINS if name in __builtins__},
-            "Signal": Signal,
-            "SignalAction": SignalAction,
-            "Strategy": Strategy,
-        }
+        namespace: dict[str, Any] = {}
+        # Build restricted builtins dict
+        if isinstance(__builtins__, dict):
+            builtins_dict = {name: __builtins__[name] for name in cls.SAFE_BUILTINS if name in __builtins__}
+        else:
+            builtins_dict = {}
+            for name in cls.SAFE_BUILTINS:
+                if hasattr(__builtins__, name):
+                    builtins_dict[name] = getattr(__builtins__, name)
+        namespace["__builtins__"] = builtins_dict
+        namespace["Signal"] = Signal
+        namespace["SignalAction"] = SignalAction
+        namespace["Strategy"] = Strategy
         # Add numpy if available (strategies may use it)
         try:
             import numpy as np
