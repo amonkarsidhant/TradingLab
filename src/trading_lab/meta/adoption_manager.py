@@ -14,8 +14,8 @@ from typing import Any
 
 from trading_lab.meta.variant_validator import VariantValidationResult
 from trading_lab.registry.performance import StrategyPerformanceRegistry
-from trading_lab.strategies import get_strategy, list_strategies, register_strategy
-from trading_lab.strategies.base import Strategy
+from trading_lab.strategies import get_strategy, list_strategies
+from trading_lab.strategies.base import Strategy, register_strategy
 
 logger = logging.getLogger(__name__)
 
