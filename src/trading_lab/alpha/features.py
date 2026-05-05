@@ -76,8 +76,8 @@ def _rsi(prices: np.ndarray, window: int = 14) -> np.ndarray:
 
 
 def _atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, window: int = 14) -> np.ndarray:
-    """Average True Range."""
-    if len(close) < 2:
+    """Average True Range with proper length guarding."""
+    if len(close) < window + 2:
         return np.full_like(close, np.nan)
     tr1 = high[1:] - low[1:]
     tr2 = np.abs(high[1:] - close[:-1])
@@ -85,7 +85,9 @@ def _atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, window: int = 14)
     tr = np.maximum(np.maximum(tr1, tr2), tr3)
     atr = _sma(tr, window)
     padded = np.full_like(close, np.nan)
-    padded[window + 1 :] = atr
+    # atr has len(close)-window elements; padded[window+1:] has len(close)-window-1 slots
+    if len(atr) > 0:
+        padded[window + 1 : window + 1 + len(atr)] = atr
     return padded
 
 
