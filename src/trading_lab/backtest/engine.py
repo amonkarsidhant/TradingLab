@@ -86,6 +86,10 @@ class BacktestEngine:
             tracker = RoundTripTracker(
                 str(PROJECT_DIR / "data/round_trips.sqlite3")
             )
+        # If tracker DB path ends in the default backtest DB, skip recording
+        # to avoid schema mismatches with the main trading_lab.sqlite3.
+        if tracker and "round_trips.sqlite3" in str(tracker.db_path):
+            tracker = None
 
         # Find the minimum window size the strategy needs.
         # We determine this empirically: feed growing windows until the
