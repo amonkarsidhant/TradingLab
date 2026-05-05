@@ -12,9 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from trading_lab.core.config import PROJECT_DIR
+from trading_lab.alpha.simulation import SimulationResult
 
 logger = logging.getLogger(__name__)
+PROJECT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 
 
 @dataclass(frozen=True)
