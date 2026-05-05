@@ -4,6 +4,7 @@ DailyJournal — reads from SQLite and renders a markdown summary report.
 Reads two tables written by SnapshotLogger:
   snapshots — timestamped API response blobs
   signals   — every strategy signal with risk/approval outcome
+  cycles    — autonomous cycle log (Phase 0 regime attribution)
 
 No network calls. No credentials. No Trading 212 API usage.
 All timestamps in the database are UTC ISO strings.
@@ -23,8 +24,9 @@ class DailyJournal:
         """Return a markdown report string for the given date (YYYY-MM-DD)."""
         snapshots = self._fetch_snapshots(report_date)
         signals = self._fetch_signals(report_date)
+        cycles = self._fetch_cycles(report_date)
         generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        return _render(report_date, generated_at, self.db_path, snapshots, signals)
+        return _render(report_date, generated_at, self.db_path, snapshots, signals, cycles)
 
     def _fetch_snapshots(self, report_date: str) -> list[dict]:
         try:
@@ -36,7 +38,6 @@ class DailyJournal:
                 ).fetchall()
                 return [dict(row) for row in rows]
         except sqlite3.OperationalError:
-            # Table does not exist yet — DB may be empty or not yet initialised.
             return []
 
     def _fetch_signals(self, report_date: str) -> list[dict]:
@@ -45,6 +46,18 @@ class DailyJournal:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     "SELECT * FROM signals WHERE date(created_at) = ?",
+                    (report_date,),
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.OperationalError:
+            return []
+
+    def _fetch_cycles(self, report_date: str) -> list[dict]:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT * FROM cycles WHERE date(timestamp) = ?",
                     (report_date,),
                 ).fetchall()
                 return [dict(row) for row in rows]
@@ -60,6 +73,7 @@ def _render(
     db_path: str,
     snapshots: list[dict],
     signals: list[dict],
+    cycles: list[dict],
 ) -> str:
     lines: list[str] = []
 
@@ -73,6 +87,30 @@ def _render(
         "---",
         "",
     ]
+
+    # ── Regime Summary (Phase 0) ──────────────────────────────────────────────
+    if cycles:
+        lines.append("## Regime & Strategy Summary")
+        lines.append("")
+        # Most recent cycle of the day
+        latest = max(cycles, key=lambda c: c.get("timestamp", ""))
+        regime = latest.get("regime", "unknown")
+        conf = latest.get("confidence", 0.0)
+        strategy = latest.get("strategy", "unknown")
+        total_signals = sum(c.get("signals_count", 0) for c in cycles)
+
+        lines.append(f"- **Regime:** {regime} (confidence: {conf:.2f})")
+        lines.append(f"- **Strategy:** {strategy}")
+        lines.append(f"- **Autonomous cycles:** {len(cycles)}")
+        lines.append(f"- **Total signals scanned:** {total_signals}")
+
+        # Regime transitions
+        if len(cycles) > 1:
+            regimes = [c.get("regime", "?") for c in sorted(cycles, key=lambda c: c.get("timestamp", ""))]
+            if len(set(regimes)) > 1:
+                lines.append(f"- **Regime transitions:** {' → '.join(regimes)}")
+        lines.append("")
+        lines += ["---", ""]
 
     # ── Snapshots ──────────────────────────────────────────────────────────────
     lines.append("## Account Snapshots")
@@ -106,29 +144,49 @@ def _render(
         dry_run_count = sum(1 for s in signals if s["dry_run"])
         live_count = len(signals) - dry_run_count
 
+        # Regime-aware signal breakdown
+        regime_signals = {}
+        for s in signals:
+            reg = s.get("regime") or "unknown"
+            regime_signals[reg] = regime_signals.get(reg, 0) + 1
+
         lines += [
             f"- Total signals: {len(signals)}",
             f"- By action: BUY: {buy_count}, SELL: {sell_count}, HOLD: {hold_count}",
             f"- Approved: {approved_count}, Rejected: {rejected_count}",
             f"- Dry-run: {dry_run_count}, Live: {live_count}",
-            "",
         ]
+        if regime_signals:
+            lines.append("- By regime: " + ", ".join(f"{k}: {v}" for k, v in sorted(regime_signals.items())))
+        lines.append("")
 
         # Signal details table
         lines.append("### Signal details")
         lines.append("")
-        lines.append("| Time (UTC) | Ticker | Action | Confidence | Approved | Reason |")
-        lines.append("|---|---|---|---|---|---|")
+        has_regime = any(s.get("regime") for s in signals)
+        if has_regime:
+            lines.append("| Time (UTC) | Ticker | Action | Confidence | Regime | Approved | Reason |")
+            lines.append("|---|---|---|---|---|---|---|")
+        else:
+            lines.append("| Time (UTC) | Ticker | Action | Confidence | Approved | Reason |")
+            lines.append("|---|---|---|---|---|---|")
         for s in signals:
             time_str = s["created_at"][11:16]  # HH:MM slice from ISO string
             approved_str = "Yes" if s["approved"] else "No"
             reason = s["reason"]
             if len(reason) > 55:
                 reason = reason[:52] + "..."
-            lines.append(
-                f"| {time_str} | {s['ticker']} | {s['action']} "
-                f"| {s['confidence']:.2f} | {approved_str} | {reason} |"
-            )
+            reg = s.get("regime") or "-"
+            if has_regime:
+                lines.append(
+                    f"| {time_str} | {s['ticker']} | {s['action']} "
+                    f"| {s['confidence']:.2f} | {reg} | {approved_str} | {reason} |"
+                )
+            else:
+                lines.append(
+                    f"| {time_str} | {s['ticker']} | {s['action']} "
+                    f"| {s['confidence']:.2f} | {approved_str} | {reason} |"
+                )
         lines.append("")
 
         # Top reasons

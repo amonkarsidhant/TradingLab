@@ -21,11 +21,10 @@ class SignalRoundTripBridge:
         self._tracker = RoundTripTracker(db_path)
         self._open: dict[str, dict[str, Any]] = {}
 
-    def on_signal(self, *, signal: Signal, price: float, dry_run: bool) -> None:
-        """Called after a signal is executed (or backtested).
+    def on_signal(self, *, signal: Signal, price: float, dry_run: bool, regime: str = "") -> None:        """Called after a signal is executed (or backtested).
 
-        On BUY: open a pending round-trip slot.
-        On SELL: close the matching open trip and write to DB.
+        On BUY: open a pending round-trip slot with regime context.
+        On SELL: close the matching open trip and write to DB (with regime).
         """
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat()
@@ -37,6 +36,7 @@ class SignalRoundTripBridge:
                 "strategy": signal.strategy,
                 "date": ts,
                 "position_id": f"{key}_{ts}",
+                "regime": regime or getattr(signal, "regime", ""),
             }
         elif signal.action == SignalAction.SELL and key in self._open:
             entry = self._open.pop(key)
@@ -58,6 +58,7 @@ class SignalRoundTripBridge:
                 pnl_pct=round(pnl_pct, 2),
                 days_held=days_held,
                 strategy=entry["strategy"],
+                regime=entry.get("regime", ""),
                 entry_date=entry["date"],
                 exit_date=ts,
             )

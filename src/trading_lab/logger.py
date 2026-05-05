@@ -43,7 +43,8 @@ class SnapshotLogger:
                     suggested_qty   REAL    NOT NULL,
                     dry_run         INTEGER NOT NULL,
                     approved        INTEGER NOT NULL,
-                    approval_reason TEXT    NOT NULL
+                    approval_reason TEXT    NOT NULL,
+                    regime          TEXT    DEFAULT ''
                 )
             """)
             conn.execute("""
@@ -88,8 +89,8 @@ class SnapshotLogger:
             conn.execute(
                 """INSERT INTO signals
                    (created_at, strategy, ticker, action, confidence, reason,
-                    suggested_qty, dry_run, approved, approval_reason)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    suggested_qty, dry_run, approved, approval_reason, regime)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     created_at,
                     signal.strategy,
@@ -101,6 +102,7 @@ class SnapshotLogger:
                     int(dry_run),
                     int(approved),
                     approval_reason,
+                    getattr(signal, "regime", "") or "",
                 ),
             )
 

@@ -32,6 +32,7 @@ class Signal:
     limit_price: float | None = None
     stop_price: float | None = None
     time_validity: TimeValidity = TimeValidity.DAY
+    regime: str = ""           # <-- Phase 0: regime at signal generation time
 
     def is_trade_signal(self) -> bool:
         return self.action in {SignalAction.BUY, SignalAction.SELL}

@@ -26,6 +26,7 @@ class RoundTrip:
     entry_date: str
     exit_date: str
     id: int | None = None
+    regime: str = ""           # <-- Phase 0: regime attribution (default to empty)
 
 
 def _sharpe(returns: list[float], risk_free_rate: float = 0.04) -> float:
@@ -60,6 +61,7 @@ class RoundTripTracker:
                     pnl             REAL    NOT NULL,
                     pnl_pct         REAL    NOT NULL,
                     days_held       INTEGER NOT NULL,
+                    regime          TEXT    DEFAULT '',
                     strategy        TEXT    DEFAULT ''
                 )
             """)
@@ -70,8 +72,8 @@ class RoundTripTracker:
             conn.execute(
                 """INSERT INTO round_trips
                    (created_at, closed_at, ticker, position_id, entry_price,
-                    exit_price, quantity, pnl, pnl_pct, days_held, strategy)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    exit_price, quantity, pnl, pnl_pct, days_held, regime, strategy)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     round_trip.entry_date,
                     round_trip.exit_date,
@@ -83,6 +85,7 @@ class RoundTripTracker:
                     round_trip.pnl,
                     round_trip.pnl_pct,
                     round_trip.days_held,
+                    round_trip.regime,
                     round_trip.strategy,
                 ),
             )
@@ -112,6 +115,8 @@ class RoundTripTracker:
                     strategy=r["strategy"],
                     entry_date=r["created_at"],
                     exit_date=r["closed_at"],
+                    id=r["id"],
+                    regime=r.get("regime") or "",
                 )
                 for r in rows
             ]

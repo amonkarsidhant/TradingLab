@@ -35,6 +35,12 @@ def run_autonomous_cycle():
     ]
     scorer = EntryScorer()
     results = scorer.rank([(strategy_id, t) for t in tickers])
+
+    # Tag each scored signal with the current regime context
+    for r in results:
+        r["regime"] = regime_str
+        r["regime_confidence"] = state.confidence
+
     signals_count = len(results)
 
     # 4. Log cycle
