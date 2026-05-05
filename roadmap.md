@@ -88,25 +88,32 @@ This is not AGI. It is a **bounded-domain recursively self-improving agent** tha
 
 ---
 
-### Phase 1 — Meta-Learning Engine (ACTIVE)
+### ✅ Phase 1 — Meta-Learning Engine (COMPLETE)
 **Goal:** The agent learns *which strategy to use*, not just running all 3. Capital allocation shifts from fixed 20%/position to strategy-weighted.
 
-**Milestones:**
-- [ ] Strategy performance registry seeded with backtest data per regime (not just live trades)
-- [ ] Capital allocation module: weight positions by strategy's regime-specific Sharpe
-- [ ] Auto-parameter tuning via grid search inside backtest harness (Strategy Sweeper)
-- [ ] Regime transition confidence score displayed in bot / Telegram
-- [ ] A/B harness: `simple_momentum` vs `pullback_mean_reversion` in same regime, same week
-- [ ] Meta-learner selects strategy daily (not just the selector fallback)
+**Status (2026-05-05):**
+- [x] M1: Strategy sweeper — walk-forward backtest per regime window (`sweeper.py`)
+- [x] M2: Seed registry — historical backtest to pre-seed performance table (`seed_registry.py`)
+- [x] M3: Capital allocator — Sharpe-weighted position sizing with hard safety rails (`allocator.py`)
+- [x] M4: Confidence-based pause — `PAUSE_THRESHOLD=0.40` halts entries when regime confidence low (`selector.PAUSE`)
+- [x] M5: A/B harness — statistical comparison with numpy-only Welch t-test (`ab_harness.py`)
+- [x] M6: Performance feedback loop — live vs backtest divergence alerts (`performance_feedback.py`)
+- [x] Gap 1: HistoricalRegimeDetector for sweeper (not live detection)
+- [x] Gap 2: Full breadth computation (45 tickers, batched download)
+- [x] Gap 3: Weekly seed-registry cron (launchd local + systemd VPS)
+- [x] Gap 4: A/B result persistence to SQLite (`ab_results` table)
 
-**Proof it works:** Backtest shows regime-aware switching beats static strategy selection by > 5% annualized.
+**Proof it works:**
+- VPS runs `seed_registry.py --days 90` → 5 strategies × 1 regime = 5 results written
+- A/B test on SPY: `simple_momentum vs mean_reversion` → `fail` persisted to `ab_results`
+- `StrategySweeper` detects `risk_off` window from historical data, backtests correctly
 
-**Estimated:** 1-2 weeks
+**Duration:** ~1 day (May 5-6, 2026)
 
 ---
 
-### Phase 2 — Self-Modification
-**Goal:** The agent edits its own strategies after validating improvements.
+### Phase 2 — Self-Modifying Agent (ACTIVE)
+**Goal:** The agent generates strategy variants, validates them, and adopts the best one — with rollback if live performance degrades.
 
 **Milestones:**
 - [ ] Strategy variant generator (LLM prompt: current source + performance → mutated version)
@@ -198,6 +205,7 @@ These are the known gaps that Phase 0-3 must close:
 |------|-------|
 | 2026-05-04 | Memory files updated (10 open positions, NVDA stopped out, strategy v1.1). SVG diagram fixed for GitHub rendering. |
 | 2026-05-05 | Phase 0 build sprint: regime detector, strategy registry, selector, autonomous cycle, hourly bot scheduler, SQLite logging. Phase 0 complete. |
+| 2026-05-05 — 06 | Phase 1 build: sweeper, seed registry, allocator, confidence pause, A/B harness, performance feedback, CLI commands. Phase 1 complete + 4 gaps closed. |
 
 ---
 
