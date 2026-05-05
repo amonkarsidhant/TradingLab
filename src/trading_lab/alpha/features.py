@@ -74,7 +74,9 @@ def _rsi(prices: np.ndarray, window: int = 14) -> np.ndarray:
     losses = np.where(deltas < 0, -deltas, 0)
     avg_gain = _sma(gains, window)
     avg_loss = _sma(losses, window)
-    rs = np.where(avg_loss == 0, 100, avg_gain / avg_loss)
+    with np.errstate(divide='ignore'):
+        raw_rs = avg_gain / avg_loss
+    rs = np.where(avg_loss == 0, 100, raw_rs)
     rsi = 100 - (100 / (1 + rs))
     # rsi has length len(prices)-1; pad to len(prices), aligning at index (window)
     padded = np.full_like(prices, np.nan)
