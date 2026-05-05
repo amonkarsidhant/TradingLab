@@ -123,6 +123,7 @@ class SyntaxSandbox:
                 if hasattr(__builtins__, name):
                     builtins_dict[name] = getattr(__builtins__, name)
         namespace["__builtins__"] = builtins_dict
+        namespace["__name__"] = "__variant__"
         namespace["Signal"] = Signal
         namespace["SignalAction"] = SignalAction
         namespace["Strategy"] = Strategy
