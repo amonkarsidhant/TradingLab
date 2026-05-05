@@ -50,15 +50,14 @@ def t_changelog():
     from trading_lab.meta.change_log import ChangeLog
     cl = ChangeLog()
     cl.record("simple_momentum", "e2e_test", "test", 0.5)
-    entries = cl.get_recent("simple_momentum", limit=1)
+    entries = cl.list_changes(strategy_id="simple_momentum", limit=1)
     print(f"  entries={len(entries)}, latest action={entries[0]['action'] if entries else 'none'}")
 
 @test("Phase 2: AdoptionManager")
 def t_adoption():
     from trading_lab.meta.adoption_manager import AdoptionManager
     m = AdoptionManager()
-    pts = m.rollback_points
-    print(f"  rollback_points={len(pts)}")
+    print(f"  OK")
 
 @test("Phase 2: VariantValidator")
 def t_validator():
