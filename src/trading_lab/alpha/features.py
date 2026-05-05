@@ -39,15 +39,19 @@ class FeatureSet:
 
 
 def _sma(arr: np.ndarray, window: int) -> np.ndarray:
-    """Simple moving average."""
+    """Simple moving average — padded to input length with NaN."""
     if len(arr) < window:
         return np.full_like(arr, np.nan)
     cumsum = np.cumsum(np.insert(arr, 0, 0))
-    return (cumsum[window:] - cumsum[:-window]) / window
+    raw = (cumsum[window:] - cumsum[:-window]) / window
+    # Pad to match original length
+    padded = np.full_like(arr, np.nan)
+    padded[window - 1 :] = raw
+    return padded
 
 
 def _ema(arr: np.ndarray, window: int) -> np.ndarray:
-    """Exponential moving average."""
+    """Exponential moving average — padded to input length with NaN."""
     if len(arr) < window:
         return np.full_like(arr, np.nan)
     alpha = 2.0 / (window + 1)
@@ -55,11 +59,14 @@ def _ema(arr: np.ndarray, window: int) -> np.ndarray:
     ema[0] = arr[0]
     for i in range(1, len(arr)):
         ema[i] = alpha * arr[i] + (1 - alpha) * ema[i - 1]
-    return ema
+    # Until window is reached, values are warmup / unreliable
+    padded = np.full_like(arr, np.nan)
+    padded[window - 1 :] = ema[window - 1 :]
+    return padded
 
 
 def _rsi(prices: np.ndarray, window: int = 14) -> np.ndarray:
-    """Relative Strength Index."""
+    """Relative Strength Index — padded to input length with NaN."""
     if len(prices) < window + 1:
         return np.full_like(prices, np.nan)
     deltas = np.diff(prices)
@@ -69,9 +76,11 @@ def _rsi(prices: np.ndarray, window: int = 14) -> np.ndarray:
     avg_loss = _sma(losses, window)
     rs = np.where(avg_loss == 0, 100, avg_gain / avg_loss)
     rsi = 100 - (100 / (1 + rs))
-    # Pad to match input length
+    # rsi has length len(prices)-1; pad to len(prices), aligning at index (window)
     padded = np.full_like(prices, np.nan)
-    padded[window:] = rsi
+    # Valid rsi starts at index (window-1) inside rsi array
+    valid_rsi = rsi[window - 1 :]
+    padded[window : window + len(valid_rsi)] = valid_rsi
     return padded
 
 
