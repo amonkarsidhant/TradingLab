@@ -932,7 +932,7 @@ def setup_job_queue(application: Application) -> None:
 
         hour = schedule["hour"]
         minute = schedule["minute"]
-        run_time = datetime.time(hour=hour, minute=minute, tzinfo=timezone.utc)
+        run_time = time(hour=hour, minute=minute, tzinfo=timezone.utc)
 
         if job_def["id"] == "weekly":
             # Friday only (0=Monday, 4=Friday)
