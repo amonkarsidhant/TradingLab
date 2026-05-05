@@ -23,7 +23,7 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
+import time as _time_module
 from datetime import datetime, timezone, time
 from pathlib import Path
 from typing import Any
@@ -264,11 +264,11 @@ async def run_job(application: Application, job_def: dict) -> dict:
     cmd = job_def["cmd"]
 
     state.running[job_id] = True
-    start = time.time()
+    start = _time_module.time()
     logger.info(f"[{job_id}] Starting: {' '.join(cmd)}")
 
     stdout, stderr, exit_code = await run_python_script(cmd, cwd=str(PROJECT_DIR))
-    duration = time.time() - start
+    duration = _time_module.time() - start
     state.running[job_id] = False
 
     result = {
@@ -932,7 +932,7 @@ def setup_job_queue(application: Application) -> None:
 
         hour = schedule["hour"]
         minute = schedule["minute"]
-        run_time = time(hour=hour, minute=minute, tzinfo=timezone.utc)
+        run_time = datetime.time(hour=hour, minute=minute, tzinfo=timezone.utc)
 
         if job_def["id"] == "weekly":
             # Friday only (0=Monday, 4=Friday)
