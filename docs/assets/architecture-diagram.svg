@@ -8,8 +8,8 @@
             <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
           </pattern>
         </defs>
-        <rect width="100%" height="100%" fill="#0f172a" />
-        <rect width="100%" height="100%" fill="url(#grid)" />
+        <rect x="0" y="0" width="1000" height="720" fill="#0f172a" />
+        <rect x="0" y="0" width="1000" height="720" fill="url(#grid)" />
 
         <!-- EXTERNAL: User / Telegram / Discord -->
         <rect x="20" y="280" width="120" height="55" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
