@@ -940,6 +940,14 @@ def daily_journal(
         typer.echo(report)
 
 
+@app.command("autonomous-cycle")
+def autonomous_cycle_cmd():
+    """Run one fully autonomous cycle: detect regime → select strategy → scan → log."""
+    from trading_lab.commands.autonomous_cycle import run_autonomous_cycle
+    result = run_autonomous_cycle()
+    print_json(result)
+
+
 @app.command("scan-rank")
 def scan_rank(
     strategy: str = typer.Option("simple_momentum", help="Strategy to score candidates on"),

@@ -70,6 +70,13 @@ SCRIPT_TIMEOUT = 120  # seconds
 # Scheduled jobs (UTC)
 JOBS = [
     {
+        "id": "autonomous_cycle",
+        "cmd": [str(VENV_PYTHON), "-m", "trading_lab.cli", "autonomous-cycle"],
+        "schedule": {"hour": "*/1"},  # Every hour
+        "emoji": "🤖",
+        "label": "Autonomous Cycle",
+    },
+    {
         "id": "premarket",
         "cmd": [str(VENV_PYTHON), "-m", "trading_lab.cli", "scan-rank"],
         "schedule": {"hour": 6, "minute": 0},
