@@ -87,12 +87,17 @@ class ABHarness:
             logger.warning("No data for %s — skipping A/B", ticker)
             return None
 
-        closes = prices_data["Close"].values if hasattr(prices_data, "values") else prices_data
-        dates = (
-            prices_data.index.strftime("%Y-%m-%d").tolist()
-            if hasattr(prices_data, "index")
-            else [str(i) for i in range(len(closes))]
-        )
+        # get_prices returns list[float] from yfinance path
+        if isinstance(prices_data, list):
+            closes = prices_data
+            dates = [str(i) for i in range(len(closes))]
+        else:
+            closes = prices_data["Close"].values if hasattr(prices_data, "values") else prices_data
+            dates = (
+                prices_data.index.strftime("%Y-%m-%d").tolist()
+                if hasattr(prices_data, "index")
+                else [str(i) for i in range(len(closes))]
+            )
 
         if len(closes) < 30:
             logger.warning("Only %d bars for %s — skipping A/B", len(closes), ticker)
