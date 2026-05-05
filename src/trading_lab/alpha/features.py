@@ -85,18 +85,19 @@ def _rsi(prices: np.ndarray, window: int = 14) -> np.ndarray:
 
 
 def _atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, window: int = 14) -> np.ndarray:
-    """Average True Range with proper length guarding."""
+    """Average True Range aligned to close length."""
     if len(close) < window + 2:
         return np.full_like(close, np.nan)
     tr1 = high[1:] - low[1:]
     tr2 = np.abs(high[1:] - close[:-1])
     tr3 = np.abs(low[1:] - close[:-1])
     tr = np.maximum(np.maximum(tr1, tr2), tr3)
-    atr = _sma(tr, window)
+    atr = _sma(tr, window)  # padded to len(tr), valid from index (window-1)
     padded = np.full_like(close, np.nan)
-    # Standard ATR alignment: first ATR at index (window), covers len(atr) elements
-    if len(atr) > 0:
-        padded[window : window + len(atr)] = atr
+    valid_start = window - 1  # first valid index in atr
+    valid_count = len(tr) - valid_start
+    if valid_count > 0:
+        padded[window : window + valid_count] = atr[valid_start : valid_start + valid_count]
     return padded
 
 
@@ -160,14 +161,16 @@ def _atr_rank(atr: np.ndarray, window: int = 20) -> np.ndarray:
     """ATR percentile rank over window."""
     if len(atr) < window:
         return np.full_like(atr, np.nan)
-    rank = np.full_like(atr, np.nan)
+    ranks = np.full_like(atr, np.nan)
     for i in range(window - 1, len(atr)):
         window_data = atr[i - window + 1 : i + 1]
-        if np.nanstd(window_data) > 0:
-            rank[i] = (atr[i] - np.nanmin(window_data)) / (np.nanmax(window_data) - np.nanmin(window_data))
+        valid = window_data[~np.isnan(window_data)]
+        if len(valid) == 0:
+            ranks[i] = np.nan
         else:
-            rank[i] = 0.5
-    return rank
+            # Percentile rank of current ATR in the window
+            ranks[i] = np.sum(valid < atr[i]) / len(valid)
+    return ranks
 
 
 # ── Feature Engine ──────────────────────────────────────────────────────────
