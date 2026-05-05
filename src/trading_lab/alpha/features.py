@@ -86,18 +86,17 @@ def _rsi(prices: np.ndarray, window: int = 14) -> np.ndarray:
 
 def _atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, window: int = 14) -> np.ndarray:
     """Average True Range aligned to close length."""
-    if len(close) < window + 2:
+    if len(close) < window + 1:
         return np.full_like(close, np.nan)
     tr1 = high[1:] - low[1:]
     tr2 = np.abs(high[1:] - close[:-1])
     tr3 = np.abs(low[1:] - close[:-1])
     tr = np.maximum(np.maximum(tr1, tr2), tr3)
-    atr = _sma(tr, window)  # padded to len(tr), valid from index (window-1)
+    atr = _sma(tr, window)  # len(tr), valid from index (window-1)
     padded = np.full_like(close, np.nan)
-    valid_start = window - 1  # first valid index in atr
-    valid_count = len(tr) - valid_start
-    if valid_count > 0:
-        padded[window : window + valid_count] = atr[valid_start : valid_start + valid_count]
+    valid = atr[window - 1:]  # len = len(tr) - (window-1) = len(close) - window
+    if len(valid) > 0:
+        padded[window:] = valid  # len(padded[window:]) = len(close) - window → EXACT MATCH
     return padded
 
 
@@ -165,10 +164,9 @@ def _atr_rank(atr: np.ndarray, window: int = 20) -> np.ndarray:
     for i in range(window - 1, len(atr)):
         window_data = atr[i - window + 1 : i + 1]
         valid = window_data[~np.isnan(window_data)]
-        if len(valid) == 0:
+        if len(valid) == 0 or np.isnan(atr[i]):
             ranks[i] = np.nan
         else:
-            # Percentile rank of current ATR in the window
             ranks[i] = np.sum(valid < atr[i]) / len(valid)
     return ranks
 
