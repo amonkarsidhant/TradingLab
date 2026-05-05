@@ -108,17 +108,21 @@ def _bbands(prices: np.ndarray, window: int = 20, num_std: float = 2.0) -> tuple
             np.full_like(prices, np.nan),
             np.full_like(prices, np.nan),
         )
-    middle = _sma(prices, window)
-    std = np.array([np.std(prices[i : i + window]) for i in range(len(prices) - window + 1)])
-    upper = middle + num_std * std
-    lower = middle - num_std * std
+    middle = _sma(prices, window)                    # full length, valid from window-1
+    valid_middle = middle[window - 1 :]                # length = len(prices)-window+1
+    std = np.array([
+        np.std(prices[i : i + window])
+        for i in range(len(prices) - window + 1)
+    ])                                                # same length as valid_middle
+    upper_raw = valid_middle + num_std * std
+    lower_raw = valid_middle - num_std * std
     # Pad to match input length
     pad_upper = np.full_like(prices, np.nan)
     pad_middle = np.full_like(prices, np.nan)
     pad_lower = np.full_like(prices, np.nan)
-    pad_upper[window - 1 :] = upper
-    pad_middle[window - 1 :] = middle
-    pad_lower[window - 1 :] = lower
+    pad_upper[window - 1 :] = upper_raw
+    pad_middle[window - 1 :] = valid_middle
+    pad_lower[window - 1 :] = lower_raw
     return pad_upper, pad_middle, pad_lower
 
 
